@@ -12,7 +12,6 @@ const PreMatchPage: React.FC = () => {
   const date = new Date().toISOString().split('T')[0];
   const [matchNumber, setMatchNumber] = useState(0);
 
-
   const handlePrediction = async (endpoint: string) => {
     setLoading(true);
     setResult('🔄 Updating match context...');
@@ -74,77 +73,77 @@ const PreMatchPage: React.FC = () => {
         textAlign: 'center',
         paddingTop: '120px',
         paddingBottom: result ? '240px' : '160px',
-        px: 2,
+        px: 2, // Added for responsive fix
       }}
     >
-     <Typography
-  variant="h3"
-  sx={{
-    color: '#FFD700',
-    fontWeight: 'bold',
-    mb: 2,
-    mt: 8,
-    fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' },
-    textAlign: 'center',
-  }}
->
-  Pre-Match Predictions
-</Typography>
-<Box sx={{ mt: 3 }}>
-  <Typography variant="h6" sx={{ color: '#FFD700', mb: 1 }}>
-    Select Match
-  </Typography>
-  <select
-    value={matchNumber}
-    onChange={(e) => setMatchNumber(Number(e.target.value))}
-    style={{
-      padding: '8px 16px',
-      borderRadius: '8px',
-      fontSize: '1rem',
-      fontFamily: 'Orbitron, sans-serif',
-    }}
-  >
-    <option value={0}>Match 1</option>
-    <option value={1}>Match 2</option>
-  </select>
-</Box>
+      <Typography
+        variant="h3"
+        sx={{
+          color: '#FFD700',
+          fontWeight: 'bold',
+          mb: 2,
+          mt: 8,
+          fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' }, // Added for responsive fix
+          textAlign: 'center',
+        }}
+      >
+        Pre-Match Predictions
+      </Typography>
 
+      <Box sx={{ mt: 3 }}>
+        <Typography variant="h6" sx={{ color: '#FFD700', mb: 1 }}>
+          Select Match
+        </Typography>
+        <select
+          value={matchNumber}
+          onChange={(e) => setMatchNumber(Number(e.target.value))}
+          style={{
+            padding: '8px 16px',
+            borderRadius: '8px',
+            fontSize: '1rem',
+            fontFamily: 'Orbitron, sans-serif',
+          }}
+        >
+          <option value={0}>Match 1</option>
+          <option value={1}>Match 2</option>
+        </select>
+      </Box>
 
-<Box
-  sx={{
-    display: 'flex',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: { xs: '1rem', sm: '2rem' },   // responsive gap
-    mt: 4,
-  }}
->
-  {predictionButtons.map((btn) => (
-    <Button
-      key={btn.label}
-      variant="contained"
-      onClick={btn.action}
-      startIcon={btn.icon}
-      sx={{
-        background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
-        borderRadius: '30px',
-        px: 4,
-        py: 2,
-        minWidth: { xs: '120px', sm: '150px' },  // responsive button width
-        fontSize: { xs: '0.8rem', sm: '1rem' },  // responsive font size
-        fontWeight: 'bold',
-        fontFamily: 'Orbitron, sans-serif',
-        color: 'white',
-        boxShadow: '0 0 15px rgba(255, 111, 97, 0.6)',
-        '&:hover': {
-          background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
-        },
-      }}
-    >
-      {btn.label.toUpperCase()}
-    </Button>
-  ))}
-</Box>
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap', // Added for responsive fix
+          justifyContent: 'center',
+          gap: { xs: '1rem', sm: '2rem' }, // Added for responsive fix
+          mt: 4,
+        }}
+      >
+        {predictionButtons.map((btn) => (
+          <Button
+            key={btn.label}
+            variant="contained"
+            onClick={btn.action}
+            startIcon={btn.icon}
+            sx={{
+              background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
+              borderRadius: '30px',
+              px: 4,
+              py: 2,
+              minWidth: { xs: '120px', sm: '150px' }, // Added for responsive fix
+              fontSize: { xs: '0.8rem', sm: '1rem' }, // Added for responsive fix
+              fontWeight: 'bold',
+              fontFamily: 'Orbitron, sans-serif',
+              color: 'white',
+              boxShadow: '0 0 15px rgba(255, 111, 97, 0.6)',
+              '&:hover': {
+                background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
+              },
+            }}
+          >
+            {btn.label.toUpperCase()}
+          </Button>
+        ))}
+      </Box>
 
       {result && (
         <Box
@@ -155,24 +154,24 @@ const PreMatchPage: React.FC = () => {
             width: '100%',
           }}
         >
-        <Paper
-  elevation={6}
-  sx={{
-    px: { xs: 2, sm: 4 },
-    py: { xs: 2, sm: 3 },
-    maxWidth: { xs: '90%', sm: '700px' },  // responsive width
-    background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
-    border: '2px solid #FFD700',
-    borderRadius: '20px',
-    boxShadow: '0 0 20px #FFD70088',
-    color: '#fff',
-    fontFamily: 'Orbitron, monospace',
-    '&:hover': {
-      boxShadow: '0 0 30px #FF3CAC99',
-      borderColor: '#FF3CAC',
-    },
-  }}
->
+          <Paper
+            elevation={6}
+            sx={{
+              px: { xs: 2, sm: 4 }, // Added for responsive fix
+              py: { xs: 2, sm: 3 }, // Added for responsive fix
+              maxWidth: { xs: '90%', sm: '700px' }, // Added for responsive fix
+              background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
+              border: '2px solid #FFD700',
+              borderRadius: '20px',
+              boxShadow: '0 0 20px #FFD70088',
+              color: '#fff',
+              fontFamily: 'Orbitron, monospace',
+              '&:hover': {
+                boxShadow: '0 0 30px #FF3CAC99',
+                borderColor: '#FF3CAC',
+              },
+            }}
+          >
             <Typography
               variant="h6"
               sx={{
@@ -207,7 +206,7 @@ const PreMatchPage: React.FC = () => {
           bottom: 0,
           width: '100%',
           textAlign: 'center',
-          p: 2,
+          p: { xs: 1, sm: 2 }, // Added for responsive fix
           backgroundColor: 'rgba(0,0,0,0.6)',
           zIndex: 10,
         }}
