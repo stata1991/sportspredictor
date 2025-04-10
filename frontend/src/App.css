@@ -62,7 +62,18 @@ body {
     opacity: 0.5;
   }
 }
+
 html, body {
   overflow-x: hidden;
   max-width: 100%;
+}
+
+html, body, #root {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+img, svg {
+  max-width: 100%;
+  height: auto;
 }
