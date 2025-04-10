@@ -79,35 +79,40 @@ const HomePage: React.FC = () => {
           alignItems: "center",
         }}
       >
-        {/* Each Card */}
+
+        {/* Each Card with Responsive Width and Height */}
         <Box
           sx={{
-            width: { xs: 80, sm: 100, md: 140, lg: 160 }, // Added for responsive fix
-            height: { xs: 100, sm: 130, md: 160, lg: 180 }, // Added for responsive fix
+            width: { xs: '60px', sm: '80px', md: '120px', lg: '140px' },   // Updated for responsive fix
+            height: { xs: '80px', sm: '100px', md: '140px', lg: '160px' }, // Updated for responsive fix
+            maxWidth: '100%',                                              // Added for responsive fix
             cursor: "pointer",
           }}
           onClick={(e) => handleCardClick("Soccer", e)}
         />
         <Box
           sx={{
-            width: { xs: 80, sm: 100, md: 140, lg: 160 }, // Added for responsive fix
-            height: { xs: 100, sm: 130, md: 160, lg: 180 }, // Added for responsive fix
+            width: { xs: '60px', sm: '80px', md: '120px', lg: '140px' },   // Updated for responsive fix
+            height: { xs: '80px', sm: '100px', md: '140px', lg: '160px' }, // Updated for responsive fix
+            maxWidth: '100%',                                              // Added for responsive fix
             cursor: "pointer",
           }}
           onClick={(e) => handleCardClick("NFL", e)}
         />
         <Box
           sx={{
-            width: { xs: 80, sm: 100, md: 140, lg: 160 }, // Added for responsive fix
-            height: { xs: 100, sm: 130, md: 160, lg: 180 }, // Added for responsive fix
+            width: { xs: '60px', sm: '80px', md: '120px', lg: '140px' },   // Updated for responsive fix
+            height: { xs: '80px', sm: '100px', md: '140px', lg: '160px' }, // Updated for responsive fix
+            maxWidth: '100%',                                              // Added for responsive fix
             cursor: "pointer",
           }}
           onClick={(e) => handleCardClick("NBA", e)}
         />
         <Box
           sx={{
-            width: { xs: 80, sm: 100, md: 140, lg: 160 }, // Added for responsive fix
-            height: { xs: 100, sm: 130, md: 160, lg: 180 }, // Added for responsive fix
+            width: { xs: '60px', sm: '80px', md: '120px', lg: '140px' },   // Updated for responsive fix
+            height: { xs: '80px', sm: '100px', md: '140px', lg: '160px' }, // Updated for responsive fix
+            maxWidth: '100%',                                              // Added for responsive fix
             cursor: "pointer",
           }}
           onClick={(e) => handleCardClick("Cricket", e)}
