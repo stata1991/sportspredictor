@@ -62,3 +62,7 @@ body {
     opacity: 0.5;
   }
 }
+html, body {
+  overflow-x: hidden;
+  max-width: 100%;
+}
