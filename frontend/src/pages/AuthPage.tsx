@@ -52,8 +52,28 @@ const AuthPage: React.FC = () => {
 
   return (
     <Container maxWidth="sm" sx={{ mt: 8 }}>
-      <Paper elevation={10} sx={{ p: 4, borderRadius: 4 }}>
-        <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: 'bold' }}>
+      <Paper
+  elevation={10}
+  sx={{
+    p: { xs: 2, sm: 4 },
+    borderRadius: 4,
+    background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
+    color: 'white',
+    boxShadow: '0 0 20px #FFD70088',
+    fontFamily: 'Orbitron, sans-serif',
+  }}
+>
+        <Typography
+  variant="h4"
+  align="center"
+  gutterBottom
+  sx={{
+    fontWeight: 'bold',
+    fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' },
+    color: '#FFD700',
+    fontFamily: 'Orbitron, sans-serif',
+  }}
+>
           {isSignUp ? 'Create Your Account' : 'Welcome Back'}
         </Typography>
 
@@ -83,10 +103,47 @@ const AuthPage: React.FC = () => {
         )}
 
         <Stack spacing={2} mt={4}>
-          <Button variant="contained" color="primary" onClick={handleEmailAuth} fullWidth>
+          <Button
+  variant="contained"
+  color="primary"
+  onClick={handleEmailAuth}
+  fullWidth
+  sx={{
+    minWidth: { xs: '120px', sm: '150px' },
+    fontSize: { xs: '0.8rem', sm: '1rem' },
+    borderRadius: '30px',
+    px: 4,
+    py: 2,
+    fontFamily: 'Orbitron, sans-serif',
+    fontWeight: 'bold',
+    background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
+    '&:hover': {
+      background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
+    },
+  }}
+>
             {isSignUp ? 'Sign Up with Email' : 'Sign In with Email'}
           </Button>
-          <Button variant="contained" color="secondary" onClick={handleGoogleSignIn} fullWidth>
+          <Button
+  variant="contained"
+  color="secondary"
+  onClick={handleGoogleSignIn}
+  fullWidth
+  sx={{
+    minWidth: { xs: '120px', sm: '150px' },
+    fontSize: { xs: '0.8rem', sm: '1rem' },
+    borderRadius: '30px',
+    px: 4,
+    py: 2,
+    fontFamily: 'Orbitron, sans-serif',
+    fontWeight: 'bold',
+    background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
+    '&:hover': {
+      background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
+    },
+  }}
+>
+
             Sign In with Google
           </Button>
         </Stack>
