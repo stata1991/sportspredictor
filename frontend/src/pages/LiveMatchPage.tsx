@@ -101,13 +101,15 @@ const LiveMatchPage: React.FC = () => {
       }}
     >
       <Typography
-        variant="h3"
-        sx={{
-          color: '#FFD700',
-          fontWeight: 'bold',
-          mb: 3,
-        }}
-      >
+  variant="h3"
+  sx={{
+    color: '#FFD700',
+    fontWeight: 'bold',
+    mb: 3,
+    fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' },
+    textAlign: 'center',
+  }}
+>
         Live Match Predictions
       </Typography>
 
@@ -134,10 +136,11 @@ const LiveMatchPage: React.FC = () => {
 </Box>
 
             <Stack
-              spacing={2}
-              direction="row"
-              sx={{ flexWrap: 'wrap', justifyContent: 'center', mb: 4 }}
-            >
+  spacing={2}
+  direction={{ xs: 'column', sm: 'row' }}
+  sx={{ flexWrap: 'wrap', justifyContent: 'center', mb: 4 }}
+>
+
               <Button
                 variant="contained"
                 onClick={() => handleLivePrediction('/predict/winner-live')}
@@ -196,8 +199,9 @@ const LiveMatchPage: React.FC = () => {
                 elevation={5}
                 sx={{
                   mt: 4,
-                  px: 4,
-                  py: 3,
+                  px: { xs: 2, sm: 4 },
+                  py: { xs: 2, sm: 3 },
+                  maxWidth: { xs: '90%', sm: '85%' },
                   background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
                   border: '2px solid #FFD700',
                   borderRadius: '20px',
@@ -297,7 +301,8 @@ const buttonStyle = {
   borderRadius: '30px',
   px: 4,
   py: 2,
-  fontSize: '1rem',
+  minWidth: { xs: '120px', sm: '150px' },
+  fontSize: { xs: '0.8rem', sm: '1rem' },
   fontWeight: 'bold',
   fontFamily: 'Orbitron, sans-serif',
   color: 'white',
@@ -306,5 +311,6 @@ const buttonStyle = {
     background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
   },
 };
+
 
 export default LiveMatchPage;
