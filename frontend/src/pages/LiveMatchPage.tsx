@@ -27,7 +27,6 @@ const LiveMatchPage: React.FC = () => {
   const date = new Date().toISOString().split('T')[0];
   const [matchNumber, setMatchNumber] = useState(0);
 
-
   // useEffect(() => {
   //   if (!currentUser) return;
   //   const checkSubscription = async () => {
@@ -97,60 +96,67 @@ const LiveMatchPage: React.FC = () => {
         textAlign: 'center',
         pt: 10,
         pb: 12,
-        px: 2,
+        px: 2,  // Added for responsive fix
       }}
     >
       <Typography
-  variant="h3"
-  sx={{
-    color: '#FFD700',
-    fontWeight: 'bold',
-    mb: 3,
-    fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' },
-    textAlign: 'center',
-  }}
->
+        variant="h3"
+        sx={{
+          color: '#FFD700',
+          fontWeight: 'bold',
+          mb: 3,
+          fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' }, // Added for responsive fix
+          textAlign: 'center',
+        }}
+      >
         Live Match Predictions
       </Typography>
 
       {currentUser ? (
-        // isSubscribed ? (
-          <>
+        <>
           <Box sx={{ textAlign: 'center', mb: 3 }}>
-  <Typography variant="h6" sx={{ color: '#FFD700', mb: 1 }}>
-    Select Match
-  </Typography>
-  <select
-    value={matchNumber}
-    onChange={(e) => setMatchNumber(Number(e.target.value))}
-    style={{
-      padding: '8px 16px',
-      borderRadius: '8px',
-      fontSize: '1rem',
-      fontFamily: 'Orbitron, sans-serif',
-    }}
-  >
-    <option value={0}>Match 1</option>
-    <option value={1}>Match 2</option>
-  </select>
-</Box>
+            <Typography variant="h6" sx={{ color: '#FFD700', mb: 1 }}>
+              Select Match
+            </Typography>
+            <select
+              value={matchNumber}
+              onChange={(e) => setMatchNumber(Number(e.target.value))}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                fontFamily: 'Orbitron, sans-serif',
+              }}
+            >
+              <option value={0}>Match 1</option>
+              <option value={1}>Match 2</option>
+            </select>
+          </Box>
 
-            <Stack
-  spacing={2}
-  direction={{ xs: 'column', sm: 'row' }}
-  sx={{ flexWrap: 'wrap', justifyContent: 'center', mb: 4 }}
->
-
+          <Stack
+            spacing={2}
+            direction={{ xs: 'column', sm: 'row' }}  // Added for responsive fix
+            sx={{ flexWrap: 'wrap', justifyContent: 'center', mb: 4 }}
+          >
+            {/* Prediction Buttons */}
+            {[
+              { label: 'LIVE WINNER', icon: <LiveTvIcon />, endpoint: '/predict/winner-live' },
+              { label: 'LIVE POWERPLAY', icon: <FlashOnIcon />, endpoint: '/predict/powerplay-live' },
+              { label: 'LIVE SCORE', icon: <ScoreboardIcon />, endpoint: '/predict/score-live' },
+              { label: 'LIVE WICKETS', icon: <WbSunnyIcon />, endpoint: '/predict/wickets-live' },
+            ].map((btn) => (
               <Button
+                key={btn.label}
                 variant="contained"
-                onClick={() => handleLivePrediction('/predict/winner-live')}
-                startIcon={<LiveTvIcon />}
+                onClick={() => handleLivePrediction(btn.endpoint)}
+                startIcon={btn.icon}
                 sx={{
                   background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
                   borderRadius: '30px',
                   px: 4,
                   py: 2,
-                  fontSize: '1rem',
+                  minWidth: { xs: '120px', sm: '150px' },  // Added for responsive fix
+                  fontSize: { xs: '0.8rem', sm: '1rem' },  // Added for responsive fix
                   fontWeight: 'bold',
                   fontFamily: 'Orbitron, sans-serif',
                   color: 'white',
@@ -160,117 +166,68 @@ const LiveMatchPage: React.FC = () => {
                   },
                 }}
               >
-                LIVE WINNER
+                {btn.label}
               </Button>
-              <Button
-                variant="contained"
-                onClick={() => handleLivePrediction('/predict/powerplay-live')}
-                startIcon={<FlashOnIcon />}
-                sx={{ ...buttonStyle }}
-              >
-                LIVE POWERPLAY
-              </Button>
-              <Button
-                variant="contained"
-                onClick={() => handleLivePrediction('/predict/score-live')}
-                startIcon={<ScoreboardIcon />}
-                sx={{ ...buttonStyle }}
-              >
-                LIVE SCORE
-              </Button>
-              <Button
-                variant="contained"
-                onClick={() => handleLivePrediction('/predict/wickets-live')}
-                startIcon={<WbSunnyIcon />}
-                sx={{ ...buttonStyle }}
-              >
-                LIVE WICKETS
-              </Button>
-            </Stack>
+            ))}
+          </Stack>
 
-            {loading && (
-              <Typography align="center" sx={{ color: '#ffca28' }}>
-                ⏳ Processing...
-              </Typography>
-            )}
+          {loading && (
+            <Typography align="center" sx={{ color: '#ffca28' }}>
+              ⏳ Processing...
+            </Typography>
+          )}
 
-            {result && (
-              <Paper
-                elevation={5}
+          {result && (
+            <Paper
+              elevation={5}
+              sx={{
+                mt: 4,
+                px: { xs: 2, sm: 4 },  // Added for responsive fix
+                py: { xs: 2, sm: 3 },  // Added for responsive fix
+                maxWidth: { xs: '90%', sm: '85%' },  // Added for responsive fix
+                background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
+                border: '2px solid #FFD700',
+                borderRadius: '20px',
+                boxShadow: '0 0 20px #FFD70088',
+                color: '#fff',
+                overflowX: 'auto',
+                fontFamily: 'Orbitron, monospace',
+                '&:hover': {
+                  boxShadow: '0 0 30px #FF3CAC99',
+                  borderColor: '#FF3CAC',
+                },
+              }}
+            >
+              <Typography
+                variant="h6"
                 sx={{
-                  mt: 4,
-                  px: { xs: 2, sm: 4 },
-                  py: { xs: 2, sm: 3 },
-                  maxWidth: { xs: '90%', sm: '85%' },
-                  background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
-                  border: '2px solid #FFD700',
-                  borderRadius: '20px',
-                  boxShadow: '0 0 20px #FFD70088',
-                  color: '#fff',
-                  overflowX: 'auto',
-                  fontFamily: 'Orbitron, monospace',
-                  '&:hover': {
-                    boxShadow: '0 0 30px #FF3CAC99',
-                    borderColor: '#FF3CAC',
-                  },
+                  color: '#FFD700',
+                  fontWeight: 'bold',
+                  fontSize: '1.2rem',
+                  mb: 2,
+                  textAlign: 'center',
                 }}
               >
-                <Typography
-                  variant="h6"
-                  sx={{
-                    color: '#FFD700',
-                    fontWeight: 'bold',
-                    fontSize: '1.2rem',
-                    mb: 2,
-                    textAlign: 'center',
-                  }}
-                >
-                  🎯 Prediction Result
-                </Typography>
-                <Box
-                  component="pre"
-                  sx={{
-                    whiteSpace: 'pre-wrap',
-                    fontSize: '0.95rem',
-                    textAlign: 'left',
-                    color: '#00E5FF',
-                  }}
-                >
-                  {result}
-                </Box>
-              </Paper>
-            )}
-          </>
-        // ) : (
-        //   <Box textAlign="center" sx={{ mt: 4 }}>
-        //     <Typography variant="h6" gutterBottom>
-        //       Subscribe to Access Live Match Predictions
-        //     </Typography>
-        //     <Button
-        //       variant="contained"
-        //       onClick={handleSubscribe}
-        //       disabled={loading}
-        //       sx={{
-        //         background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
-        //         borderRadius: '30px',
-        //         px: 4,
-        //         py: 2,
-        //         fontSize: '1rem',
-        //         fontWeight: 'bold',
-        //         fontFamily: 'Orbitron, sans-serif',
-        //         color: 'white',
-        //         boxShadow: '0 0 15px rgba(255, 111, 97, 0.6)',
-        //         '&:hover': {
-        //           background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
-        //         },
-        //       }}
-        //     >
-        //       {loading ? 'Processing...' : 'Subscribe Now ($4.99/month or ₹199)'}
-        //     </Button>
-        //   </Box>
-        // )
+                🎯 Prediction Result
+              </Typography>
+              <Box
+                component="pre"
+                sx={{
+                  whiteSpace: 'pre-wrap',
+                  fontSize: '0.95rem',
+                  textAlign: 'left',
+                  color: '#00E5FF',
+                }}
+              >
+                {result}
+              </Box>
+            </Paper>
+          )}
+        </>
       ) : (
-        <Typography variant="h6" mt={6}>🔒 Please sign in to access live match predictions.</Typography>
+        <Typography variant="h6" mt={6}>
+          🔒 Please sign in to access live match predictions.
+        </Typography>
       )}
 
       {/* Disclaimer */}
@@ -280,7 +237,7 @@ const LiveMatchPage: React.FC = () => {
           bottom: 0,
           width: '100%',
           textAlign: 'center',
-          p: 2,
+          p: { xs: 1, sm: 2 },  // Added for responsive fix
           backgroundColor: 'rgba(0,0,0,0.6)',
           zIndex: 10,
         }}
@@ -294,22 +251,5 @@ const LiveMatchPage: React.FC = () => {
     </Box>
   );
 };
-
-const buttonStyle = {
-  background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
-  borderRadius: '30px',
-  px: 4,
-  py: 2,
-  minWidth: { xs: '120px', sm: '150px' },
-  fontSize: { xs: '0.8rem', sm: '1rem' },
-  fontWeight: 'bold',
-  fontFamily: 'Orbitron, sans-serif',
-  color: 'white',
-  boxShadow: '0 0 15px rgba(255, 111, 97, 0.6)',
-  '&:hover': {
-    background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
-  },
-};
-
 
 export default LiveMatchPage;
