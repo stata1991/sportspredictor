@@ -17,10 +17,10 @@ const Header: React.FC = () => {
   };
 
   const currentTab = location.pathname.startsWith('/live')
-  ? '/live'
-  : location.pathname.startsWith('/cricket/ipl')
-  ? '/cricket/ipl'
-  : '/';
+    ? '/live'
+    : location.pathname.startsWith('/cricket/ipl')
+    ? '/cricket/ipl'
+    : '/';
 
   const handleSignOut = async () => {
     try {
@@ -42,7 +42,14 @@ const Header: React.FC = () => {
         fontFamily: 'Orbitron, sans-serif',
       }}
     >
-      <Toolbar sx={{ display: 'flex', justifyContent: 'space-between' }}>
+      <Toolbar
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',  // Added for responsive fix
+          gap: { xs: 1, sm: 0 }, // Responsive spacing
+        }}
+      >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Typography variant="h6" sx={{ color: 'white', mr: 2, fontFamily: 'Orbitron, sans-serif' }}>
             IPL Predictor
@@ -61,21 +68,27 @@ const Header: React.FC = () => {
             </Button>
           )}
         </Box>
+
         <Tabs
-  value={currentTab}
-  onChange={handleTabChange}
-  textColor="inherit"
-  indicatorColor="secondary"
-  sx={{ color: 'white' }}
->
-  <Tab label="Pre-Match" value="/cricket/ipl" sx={{ color: 'white' }} />
-  <Tab label="Live Match" value="/live" sx={{ color: 'white' }} />
-  {currentUser ? (
-    <Tab label="Sign Out" onClick={handleSignOut} sx={{ color: 'white' }} />
-  ) : (
-    <Tab label="Sign In" value="/auth" sx={{ color: 'white' }} />
-  )}
-</Tabs>
+          value={currentTab}
+          onChange={handleTabChange}
+          textColor="inherit"
+          indicatorColor="secondary"
+          sx={{
+            color: 'white',
+            overflowX: 'auto', // Added for responsive fix
+            maxWidth: '100%',  // Added for responsive fix
+          }}
+        >
+          <Tab label="Pre-Match" value="/cricket/ipl" sx={{ color: 'white' }} />
+          <Tab label="Live Match" value="/live" sx={{ color: 'white' }} />
+          {currentUser ? (
+            <Tab label="Sign Out" onClick={handleSignOut} sx={{ color: 'white' }} />
+          ) : (
+            <Tab label="Sign In" value="/auth" sx={{ color: 'white' }} />
+          )}
+        </Tabs>
+
         <Box>
           {currentUser ? (
             <IconButton onClick={handleSignOut} sx={{ color: 'white' }}>
