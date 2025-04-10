@@ -17,7 +17,6 @@ import {
 import LoginIcon from "@mui/icons-material/Login";
 import homeBg from '../home.png'; // adjust if path is different
 
-
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
@@ -69,53 +68,51 @@ const HomePage: React.FC = () => {
 
       {/* Clickable sport zones */}
       <Box
-  sx={{
-    position: "absolute",
-    top: "50%",
-    left: "50%",
-    transform: "translate(-50%, -20%)",
-    display: "flex",
-    flexDirection: { xs: "column", sm: "row" },
-    gap: { xs: "1rem", sm: "2rem" },
-    alignItems: "center",
-  }}
->
-
-  <Box
-  sx={{
-    width: { xs: 100, sm: 130 },
-    height: { xs: 140, sm: 180 },
-    cursor: "pointer",
-  }}
-    onClick={(e) => handleCardClick("Soccer", e)}
-  />
-  <Box
-    sx={{
-      width: 160,
-      height: 200,
-      cursor: "pointer"
-    }}
-    onClick={(e) => handleCardClick("NFL", e)}
-  />
-  <Box
-    sx={{
-      width: 160,
-      height: 200,
-      cursor: "pointer"
-    }}
-    onClick={(e) => handleCardClick("NBA", e)}
-  />
-  <Box
-    sx={{
-      width: 160,
-      height: 200,
-      cursor: "pointer"
-    }}
-    onClick={(e) => handleCardClick("Cricket", e)}
-  />
-</Box>
-
-
+        sx={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -20%)",
+          display: "flex",
+          flexDirection: { xs: "column", sm: "row" },  // Added for responsive fix
+          gap: { xs: "1rem", sm: "2rem" },             // Added for responsive fix
+          alignItems: "center",
+        }}
+      >
+        {/* Each Card */}
+        <Box
+          sx={{
+            width: { xs: 80, sm: 100, md: 140, lg: 160 }, // Added for responsive fix
+            height: { xs: 100, sm: 130, md: 160, lg: 180 }, // Added for responsive fix
+            cursor: "pointer",
+          }}
+          onClick={(e) => handleCardClick("Soccer", e)}
+        />
+        <Box
+          sx={{
+            width: { xs: 80, sm: 100, md: 140, lg: 160 }, // Added for responsive fix
+            height: { xs: 100, sm: 130, md: 160, lg: 180 }, // Added for responsive fix
+            cursor: "pointer",
+          }}
+          onClick={(e) => handleCardClick("NFL", e)}
+        />
+        <Box
+          sx={{
+            width: { xs: 80, sm: 100, md: 140, lg: 160 }, // Added for responsive fix
+            height: { xs: 100, sm: 130, md: 160, lg: 180 }, // Added for responsive fix
+            cursor: "pointer",
+          }}
+          onClick={(e) => handleCardClick("NBA", e)}
+        />
+        <Box
+          sx={{
+            width: { xs: 80, sm: 100, md: 140, lg: 160 }, // Added for responsive fix
+            height: { xs: 100, sm: 130, md: 160, lg: 180 }, // Added for responsive fix
+            cursor: "pointer",
+          }}
+          onClick={(e) => handleCardClick("Cricket", e)}
+        />
+      </Box>
 
       {/* Cricket dropdown */}
       <Menu
@@ -140,7 +137,14 @@ const HomePage: React.FC = () => {
       </Dialog>
 
       {/* Disclaimer */}
-      <Box sx={{ position: "absolute", bottom: 0, width: "100%", textAlign: "center", p: { xs: 1, sm: 2 }, backgroundColor: "rgba(0,0,0,0.6)" }}>
+      <Box sx={{
+        position: "absolute",
+        bottom: 0,
+        width: "100%",
+        textAlign: "center",
+        p: { xs: 1, sm: 2 },  // Added for responsive fix
+        backgroundColor: "rgba(0,0,0,0.6)"
+      }}>
         <Divider />
         <Typography variant="body2" color="white" mt={1}>
           ⚠️ FantasyFuel.ai is intended for entertainment and informational purposes only.
