@@ -12,10 +12,23 @@ import {
   Button,
   IconButton,
   Typography,
-  Divider
+  Divider,
 } from "@mui/material";
 import LoginIcon from "@mui/icons-material/Login";
-import homeBg from '../home.png'; // adjust if path is different
+
+// Import images
+import homeBg from "../non-home.png";
+import soccerIcon from "../soccer.png";
+import nflIcon from "../nfl.png";
+import nbaIcon from "../nba.png";
+import cricketIcon from "../cricket.png";
+
+const sportsData = [
+  { name: "Soccer", icon: soccerIcon },
+  { name: "NFL", icon: nflIcon },
+  { name: "NBA", icon: nbaIcon },
+  { name: "Cricket", icon: cricketIcon },
+];
 
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
@@ -26,17 +39,11 @@ const HomePage: React.FC = () => {
   const handleCardClick = (sport: string, event: React.MouseEvent) => {
     if (sport === "Cricket") {
       setAnchorEl(event.currentTarget as HTMLElement);
+      navigate("/cricket/ipl");
     } else {
       setSelectedSport(sport);
       setDialogOpen(true);
     }
-  };
-
-  const handleCricketOptionClick = (option: string) => {
-    if (option === "IPL") {
-      navigate("/cricket/ipl");
-    }
-    setAnchorEl(null);
   };
 
   const handleDialogClose = () => {
@@ -59,77 +66,77 @@ const HomePage: React.FC = () => {
         overflow: "hidden",
       }}
     >
-      {/* Top right Sign In */}
+      {/* Top Right Sign In */}
       <Box sx={{ position: "absolute", top: 16, right: 16 }}>
         <IconButton onClick={handleSignInClick} sx={{ color: "white" }}>
           <LoginIcon />
         </IconButton>
       </Box>
 
-      {/* Clickable sport zones */}
+      {/* Title and Subtitle */}
       <Box
         sx={{
-          position: "absolute",
-          top: "50%",
-          left: "50%",
-          transform: "translate(-50%, -20%)",
-          display: "flex",
-          flexDirection: { xs: "column", sm: "row" },  // Responsive fix
-          gap: { xs: "1rem", sm: "2rem" },              // Responsive fix
-          alignItems: "center",
+          textAlign: "center",
+          pt: { xs: 8, sm: 12 },
         }}
       >
-
-        {/* Soccer Card */}
-        <Box
-          sx={{
-            width: { xs: 100, sm: 130, md: 130 },   // Responsive fix applied
-            height: { xs: 140, sm: 180, md: 180 }, // Responsive fix applied
-            cursor: "pointer",
-          }}
-          onClick={(e) => handleCardClick("Soccer", e)}
-        />
-
-        {/* NFL Card */}
-        <Box
-          sx={{
-            width: { xs: 110, sm: 140, md: 160 },  // Responsive fix applied
-            height: { xs: 150, sm: 180, md: 200 }, // Responsive fix applied
-            cursor: "pointer",
-          }}
-          onClick={(e) => handleCardClick("NFL", e)}
-        />
-
-        {/* NBA Card */}
-        <Box
-          sx={{
-            width: { xs: 110, sm: 140, md: 160 },  // Responsive fix applied
-            height: { xs: 150, sm: 180, md: 200 }, // Responsive fix applied
-            cursor: "pointer",
-          }}
-          onClick={(e) => handleCardClick("NBA", e)}
-        />
-
-        {/* Cricket Card */}
-        <Box
-          sx={{
-            width: { xs: 110, sm: 140, md: 160 },  // Responsive fix applied
-            height: { xs: 150, sm: 180, md: 200 }, // Responsive fix applied
-            cursor: "pointer",
-          }}
-          onClick={(e) => handleCardClick("Cricket", e)}
-        />
-
+        <Typography
+          variant="h4"
+          sx={{ fontWeight: "bold", mb: 1, fontFamily: "Orbitron, sans-serif" }}
+        >
+          Welcome to FantasyFuel.ai
+        </Typography>
+        <Typography variant="subtitle1">
+          Fuel your fantasy sports predictions!
+        </Typography>
       </Box>
 
-      {/* Cricket dropdown */}
-      <Menu
-        anchorEl={anchorEl}
-        open={Boolean(anchorEl)}
-        onClose={() => setAnchorEl(null)}
+      {/* Clickable Sports Cards */}
+      <Box
+        sx={{
+          mt: { xs: 6, sm: 10 },
+          display: "flex",
+          flexDirection: { xs: "column", sm: "row" },
+          justifyContent: "center",
+          alignItems: "center",
+          gap: { xs: 3, sm: 5 },
+          px: { xs: 2, sm: 0 },
+        }}
       >
-        <MenuItem onClick={() => handleCricketOptionClick("IPL")}>IPL</MenuItem>
-      </Menu>
+        {sportsData.map((sport) => (
+          <Box
+            key={sport.name}
+            onClick={(e) => handleCardClick(sport.name, e)}
+            sx={{
+              backgroundColor: "rgba(0,0,0,0.7)",
+              borderRadius: "12px",
+              boxShadow: "0px 4px 10px rgba(0,0,0,0.5)",
+              width: { xs: "120px", sm: "140px", md: "160px" },
+              height: { xs: "140px", sm: "160px", md: "180px" },
+              cursor: "pointer",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "transform 0.2s",
+              "&:hover": {
+                transform: "scale(1.05)",
+              },
+            }}
+          >
+            <img
+  src={sport.icon}
+  alt={sport.name}
+  style={{ 
+    width: "100%",   
+    height: "100%", 
+    objectFit: "contain"
+  }}
+/>
+
+          </Box>
+        ))}
+      </Box>
 
       {/* Coming Soon Dialog */}
       <Dialog open={dialogOpen} onClose={handleDialogClose}>
@@ -145,11 +152,20 @@ const HomePage: React.FC = () => {
       </Dialog>
 
       {/* Disclaimer */}
-      <Box sx={{ position: "absolute", bottom: 0, width: "100%", textAlign: "center", p: { xs: 1, sm: 2 }, backgroundColor: "rgba(0,0,0,0.6)" }}>
+      <Box
+        sx={{
+          position: "absolute",
+          bottom: 0,
+          width: "100%",
+          textAlign: "center",
+          p: { xs: 1, sm: 2 },
+          backgroundColor: "rgba(0,0,0,0.6)",
+        }}
+      >
         <Divider />
         <Typography variant="body2" color="white" mt={1}>
-          ⚠️ FantasyFuel.ai is intended for entertainment and informational purposes only.
-          Predictions should not be used for betting or gambling.
+          ⚠️ FantasyFuel.ai is intended for entertainment and informational
+          purposes only. Predictions should not be used for betting or gambling.
         </Typography>
       </Box>
     </Box>
