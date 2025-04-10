@@ -207,7 +207,6 @@ const LiveMatchPage: React.FC = () => {
                   borderRadius: '20px',
                   boxShadow: '0 0 20px #FFD70088',
                   color: '#fff',
-                  maxWidth: '85%',
                   overflowX: 'auto',
                   fontFamily: 'Orbitron, monospace',
                   '&:hover': {
