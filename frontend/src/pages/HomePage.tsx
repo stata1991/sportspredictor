@@ -101,6 +101,7 @@ const HomePage: React.FC = () => {
           alignItems: "center",
           gap: { xs: 3, sm: 5 },
           px: { xs: 2, sm: 0 },
+          mb: { xs: 10, sm: 0 },
         }}
       >
         {sportsData.map((sport) => (
