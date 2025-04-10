@@ -82,11 +82,11 @@ const HomePage: React.FC = () => {
 >
 
   <Box
-    sx={{
-      width: 160,
-      height: 200,
-      cursor: "pointer"
-    }}
+  sx={{
+    width: { xs: 100, sm: 130 },
+    height: { xs: 140, sm: 180 },
+    cursor: "pointer",
+  }}
     onClick={(e) => handleCardClick("Soccer", e)}
   />
   <Box
@@ -140,7 +140,7 @@ const HomePage: React.FC = () => {
       </Dialog>
 
       {/* Disclaimer */}
-      <Box sx={{ position: "absolute", bottom: 0, width: "100%", textAlign: "center", p: 2, backgroundColor: "rgba(0,0,0,0.6)" }}>
+      <Box sx={{ position: "absolute", bottom: 0, width: "100%", textAlign: "center", p: { xs: 1, sm: 2 }, backgroundColor: "rgba(0,0,0,0.6)" }}>
         <Divider />
         <Typography variant="body2" color="white" mt={1}>
           ⚠️ FantasyFuel.ai is intended for entertainment and informational purposes only.
