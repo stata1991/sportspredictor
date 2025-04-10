@@ -56,7 +56,7 @@ const HomePage: React.FC = () => {
         backgroundSize: "cover",
         backgroundPosition: "center",
         color: "white",
-        overflowX: "hidden", // Added for responsive fix
+        overflow: "hidden",
       }}
     >
       {/* Top right Sign In */}
@@ -74,25 +74,51 @@ const HomePage: React.FC = () => {
           left: "50%",
           transform: "translate(-50%, -20%)",
           display: "flex",
-          flexDirection: { xs: "column", sm: "row" },  // Responsive
-          gap: { xs: "1rem", sm: "2rem" },              // Responsive
+          flexDirection: { xs: "column", sm: "row" },  // Responsive fix
+          gap: { xs: "1rem", sm: "2rem" },              // Responsive fix
           alignItems: "center",
         }}
       >
 
-        {/* Each Card — Responsive Fix */}
-        {["Soccer", "NFL", "NBA", "Cricket"].map((sport) => (
-          <Box
-            key={sport}
-            sx={{
-              width: '100%',  // Full width of parent
-              maxWidth: { xs: '70px', sm: '100px', md: '140px' }, // Responsive card size
-              height: { xs: '90px', sm: '110px', md: '140px' },   // Responsive card height
-              cursor: "pointer",
-            }}
-            onClick={(e) => handleCardClick(sport, e)}
-          />
-        ))}
+        {/* Soccer Card */}
+        <Box
+          sx={{
+            width: { xs: 100, sm: 130, md: 130 },   // Responsive fix applied
+            height: { xs: 140, sm: 180, md: 180 }, // Responsive fix applied
+            cursor: "pointer",
+          }}
+          onClick={(e) => handleCardClick("Soccer", e)}
+        />
+
+        {/* NFL Card */}
+        <Box
+          sx={{
+            width: { xs: 110, sm: 140, md: 160 },  // Responsive fix applied
+            height: { xs: 150, sm: 180, md: 200 }, // Responsive fix applied
+            cursor: "pointer",
+          }}
+          onClick={(e) => handleCardClick("NFL", e)}
+        />
+
+        {/* NBA Card */}
+        <Box
+          sx={{
+            width: { xs: 110, sm: 140, md: 160 },  // Responsive fix applied
+            height: { xs: 150, sm: 180, md: 200 }, // Responsive fix applied
+            cursor: "pointer",
+          }}
+          onClick={(e) => handleCardClick("NBA", e)}
+        />
+
+        {/* Cricket Card */}
+        <Box
+          sx={{
+            width: { xs: 110, sm: 140, md: 160 },  // Responsive fix applied
+            height: { xs: 150, sm: 180, md: 200 }, // Responsive fix applied
+            cursor: "pointer",
+          }}
+          onClick={(e) => handleCardClick("Cricket", e)}
+        />
 
       </Box>
 
@@ -119,14 +145,7 @@ const HomePage: React.FC = () => {
       </Dialog>
 
       {/* Disclaimer */}
-      <Box sx={{
-        position: "absolute",
-        bottom: 0,
-        width: "100%",
-        textAlign: "center",
-        p: { xs: 1, sm: 2 },
-        backgroundColor: "rgba(0,0,0,0.6)"
-      }}>
+      <Box sx={{ position: "absolute", bottom: 0, width: "100%", textAlign: "center", p: { xs: 1, sm: 2 }, backgroundColor: "rgba(0,0,0,0.6)" }}>
         <Divider />
         <Typography variant="body2" color="white" mt={1}>
           ⚠️ FantasyFuel.ai is intended for entertainment and informational purposes only.
