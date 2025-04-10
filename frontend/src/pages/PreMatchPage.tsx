@@ -110,40 +110,41 @@ const PreMatchPage: React.FC = () => {
 </Box>
 
 
-      <Box
-        sx={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          gap: '2rem',
-          mt: 4,
-        }}
-      >
-        {predictionButtons.map((btn) => (
-          <Button
-            key={btn.label}
-            variant="contained"
-            onClick={btn.action}
-            startIcon={btn.icon}
-            sx={{
-              background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
-              borderRadius: '30px',
-              px: 4,
-              py: 2,
-              fontSize: '1rem',
-              fontWeight: 'bold',
-              fontFamily: 'Orbitron, sans-serif',
-              color: 'white',
-              boxShadow: '0 0 15px rgba(255, 111, 97, 0.6)',
-              '&:hover': {
-                background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
-              },
-            }}
-          >
-            {btn.label.toUpperCase()}
-          </Button>
-        ))}
-      </Box>
+<Box
+  sx={{
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: { xs: '1rem', sm: '2rem' },   // responsive gap
+    mt: 4,
+  }}
+>
+  {predictionButtons.map((btn) => (
+    <Button
+      key={btn.label}
+      variant="contained"
+      onClick={btn.action}
+      startIcon={btn.icon}
+      sx={{
+        background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
+        borderRadius: '30px',
+        px: 4,
+        py: 2,
+        minWidth: { xs: '120px', sm: '150px' },  // responsive button width
+        fontSize: { xs: '0.8rem', sm: '1rem' },  // responsive font size
+        fontWeight: 'bold',
+        fontFamily: 'Orbitron, sans-serif',
+        color: 'white',
+        boxShadow: '0 0 15px rgba(255, 111, 97, 0.6)',
+        '&:hover': {
+          background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
+        },
+      }}
+    >
+      {btn.label.toUpperCase()}
+    </Button>
+  ))}
+</Box>
 
       {result && (
         <Box
@@ -154,24 +155,24 @@ const PreMatchPage: React.FC = () => {
             width: '100%',
           }}
         >
-          <Paper
-            elevation={6}
-            sx={{
-              px: 4,
-              py: 3,
-              maxWidth: '700px',
-              background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
-              border: '2px solid #FFD700',
-              borderRadius: '20px',
-              boxShadow: '0 0 20px #FFD70088',
-              color: '#fff',
-              fontFamily: 'Orbitron, monospace',
-              '&:hover': {
-                boxShadow: '0 0 30px #FF3CAC99',
-                borderColor: '#FF3CAC',
-              },
-            }}
-          >
+        <Paper
+  elevation={6}
+  sx={{
+    px: { xs: 2, sm: 4 },
+    py: { xs: 2, sm: 3 },
+    maxWidth: { xs: '90%', sm: '700px' },  // responsive width
+    background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
+    border: '2px solid #FFD700',
+    borderRadius: '20px',
+    boxShadow: '0 0 20px #FFD70088',
+    color: '#fff',
+    fontFamily: 'Orbitron, monospace',
+    '&:hover': {
+      boxShadow: '0 0 30px #FF3CAC99',
+      borderColor: '#FF3CAC',
+    },
+  }}
+>
             <Typography
               variant="h6"
               sx={{
