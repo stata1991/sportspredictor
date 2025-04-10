@@ -56,7 +56,7 @@ const HomePage: React.FC = () => {
         backgroundSize: "cover",
         backgroundPosition: "center",
         color: "white",
-        overflow: "hidden",
+        overflowX: "hidden", // Added for responsive fix
       }}
     >
       {/* Top right Sign In */}
@@ -74,49 +74,26 @@ const HomePage: React.FC = () => {
           left: "50%",
           transform: "translate(-50%, -20%)",
           display: "flex",
-          flexDirection: { xs: "column", sm: "row" },  // Added for responsive fix
-          gap: { xs: "1rem", sm: "2rem" },             // Added for responsive fix
+          flexDirection: { xs: "column", sm: "row" },  // Responsive
+          gap: { xs: "1rem", sm: "2rem" },              // Responsive
           alignItems: "center",
         }}
       >
 
-        {/* Each Card with Responsive Width and Height */}
-        <Box
-          sx={{
-            width: { xs: '60px', sm: '80px', md: '120px', lg: '140px' },   // Updated for responsive fix
-            height: { xs: '80px', sm: '100px', md: '140px', lg: '160px' }, // Updated for responsive fix
-            maxWidth: '100%',                                              // Added for responsive fix
-            cursor: "pointer",
-          }}
-          onClick={(e) => handleCardClick("Soccer", e)}
-        />
-        <Box
-          sx={{
-            width: { xs: '60px', sm: '80px', md: '120px', lg: '140px' },   // Updated for responsive fix
-            height: { xs: '80px', sm: '100px', md: '140px', lg: '160px' }, // Updated for responsive fix
-            maxWidth: '100%',                                              // Added for responsive fix
-            cursor: "pointer",
-          }}
-          onClick={(e) => handleCardClick("NFL", e)}
-        />
-        <Box
-          sx={{
-            width: { xs: '60px', sm: '80px', md: '120px', lg: '140px' },   // Updated for responsive fix
-            height: { xs: '80px', sm: '100px', md: '140px', lg: '160px' }, // Updated for responsive fix
-            maxWidth: '100%',                                              // Added for responsive fix
-            cursor: "pointer",
-          }}
-          onClick={(e) => handleCardClick("NBA", e)}
-        />
-        <Box
-          sx={{
-            width: { xs: '60px', sm: '80px', md: '120px', lg: '140px' },   // Updated for responsive fix
-            height: { xs: '80px', sm: '100px', md: '140px', lg: '160px' }, // Updated for responsive fix
-            maxWidth: '100%',                                              // Added for responsive fix
-            cursor: "pointer",
-          }}
-          onClick={(e) => handleCardClick("Cricket", e)}
-        />
+        {/* Each Card — Responsive Fix */}
+        {["Soccer", "NFL", "NBA", "Cricket"].map((sport) => (
+          <Box
+            key={sport}
+            sx={{
+              width: '100%',  // Full width of parent
+              maxWidth: { xs: '70px', sm: '100px', md: '140px' }, // Responsive card size
+              height: { xs: '90px', sm: '110px', md: '140px' },   // Responsive card height
+              cursor: "pointer",
+            }}
+            onClick={(e) => handleCardClick(sport, e)}
+          />
+        ))}
+
       </Box>
 
       {/* Cricket dropdown */}
@@ -147,7 +124,7 @@ const HomePage: React.FC = () => {
         bottom: 0,
         width: "100%",
         textAlign: "center",
-        p: { xs: 1, sm: 2 },  // Added for responsive fix
+        p: { xs: 1, sm: 2 },
         backgroundColor: "rgba(0,0,0,0.6)"
       }}>
         <Divider />
