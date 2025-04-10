@@ -71,13 +71,16 @@ const HomePage: React.FC = () => {
       <Box
   sx={{
     position: "absolute",
-    top: "58%",
+    top: "50%",
     left: "50%",
-    transform: "translate(-50%, -50%)",
+    transform: "translate(-50%, -20%)",
     display: "flex",
-    gap: "4rem",
+    flexDirection: { xs: "column", sm: "row" },
+    gap: { xs: "1rem", sm: "2rem" },
+    alignItems: "center",
   }}
 >
+
   <Box
     sx={{
       width: 160,
