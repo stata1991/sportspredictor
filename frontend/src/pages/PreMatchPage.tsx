@@ -77,14 +77,15 @@ const PreMatchPage: React.FC = () => {
         px: 2,
       }}
     >
-      <Typography
-  variant="h4"
+     <Typography
+  variant="h3"
   sx={{
     color: '#FFD700',
     fontWeight: 'bold',
-    mt: 10,
-    mb: 4,
-    textShadow: '2px 2px 8px rgba(0, 0, 0, 0.8)',
+    mb: 2,
+    mt: 8,
+    fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' },
+    textAlign: 'center',
   }}
 >
   Pre-Match Predictions
