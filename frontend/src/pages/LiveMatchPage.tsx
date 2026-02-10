@@ -1,251 +1,304 @@
-import React, { useState/*, useEffect*/ } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  Stack,
-  Paper,
-  Divider,
-} from '@mui/material';
-import LiveTvIcon from '@mui/icons-material/LiveTv';
-import FlashOnIcon from '@mui/icons-material/FlashOn';
-import ScoreboardIcon from '@mui/icons-material/Scoreboard';
-import WbSunnyIcon from '@mui/icons-material/WbSunny';
-// import { loadStripe } from '@stripe/stripe-js';
+import React, { useMemo, useState } from 'react';
+import { Box, Typography, Button, Paper, Divider, ToggleButton, ToggleButtonGroup, CircularProgress } from '@mui/material';
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
 import homeBg from '../non-home.png';
 
-// const stripePromise = loadStripe('pk_test_...'); // Replace with actual key
+type RiskMode = 'conservative' | 'balanced' | 'aggressive';
+
+type WinnerLiveResponse = {
+  current_score?: number;
+  overs?: number;
+  wickets?: number;
+  win_probability?: Record<string, number>;
+  message?: string;
+  error?: string;
+};
+
+type LiveStateResponse = {
+  batting_team?: string;
+  runs?: number;
+  wickets?: number;
+  overs?: number;
+};
+
+type DecisionResponse = {
+  recommendation: {
+    direction: 'Hold' | 'Lean' | 'Strong' | 'Flip';
+    action: string;
+    moment: string;
+  };
+  micro_why: string;
+  next_window_in: string;
+  silent: boolean;
+  silent_reason: string | null;
+  internal_state: {
+    direction_score: number;
+  };
+};
 
 const LiveMatchPage: React.FC = () => {
   const { currentUser, loading: authLoading } = useAuth();
-  // const [isSubscribed, setIsSubscribed] = useState(false);
-  const [result, setResult] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
-  const navigate = useNavigate();
-  const date = new Date().toISOString().split('T')[0];
+  const [loading, setLoading] = useState(false);
+  const [riskMode, setRiskMode] = useState<RiskMode>('balanced');
+  const [showWhy, setShowWhy] = useState(false);
   const [matchNumber, setMatchNumber] = useState(0);
+  const [decision, setDecision] = useState<DecisionResponse | null>(null);
+  const [message, setMessage] = useState('');
 
-  // useEffect(() => {
-  //   if (!currentUser) return;
-  //   const checkSubscription = async () => {
-  //     try {
-  //       const response = await fetch(`http://localhost:5000/check-subscription/${currentUser.uid}`);
-  //       const data = await response.json();
-  //       setIsSubscribed(data.isSubscribed);
-  //     } catch (error) {
-  //       console.error('Error checking subscription:', error);
-  //       setIsSubscribed(false);
-  //     }
-  //   };
-  //   checkSubscription();
-  // }, [currentUser]);
+  const date = new Date().toISOString().split('T')[0];
 
-  const handleLivePrediction = async (endpoint: string) => {
-    setResult('🔄 Updating match context...');
+  const palette = useMemo(
+    () => ({
+      bg: '#0d1117',
+      card: '#111827',
+      border: '#334155',
+      primary: '#e2e8f0',
+      muted: '#94a3b8',
+      accent: '#22d3ee',
+      hold: '#94a3b8',
+      lean: '#38bdf8',
+      strong: '#34d399',
+      flip: '#f59e0b',
+      silent: '#64748b',
+    }),
+    []
+  );
+
+  const directionColor = (d: string) => {
+    if (d === 'Strong') return palette.strong;
+    if (d === 'Lean') return palette.lean;
+    if (d === 'Flip') return palette.flip;
+    return palette.hold;
+  };
+
+  const getDecision = async () => {
     setLoading(true);
+    setMessage('');
     try {
-      await fetch(`http://127.0.0.1:8000/update-match-context?date=${date}&match_number=${matchNumber}`, { method: 'POST' });
-      await fetch(`http://127.0.0.1:8000/live-match-state?date=${date}&match_number=${matchNumber}`);
-      const predictionRes = await fetch(`http://127.0.0.1:8000${endpoint}?date=${date}&match_number=${matchNumber}`);
-      const data = await predictionRes.json();
-      setResult(JSON.stringify(data, null, 2));
+      const updateRes = await fetch(`http://127.0.0.1:8000/update-match-context?date=${date}&match_number=${matchNumber}`, {
+        method: 'POST',
+      });
+      if (!updateRes.ok) throw new Error('Unable to update live match context');
+
+      const liveRes = await fetch(`http://127.0.0.1:8000/live-match-state?date=${date}`);
+      if (!liveRes.ok) throw new Error('Unable to fetch live state');
+      const liveState: LiveStateResponse = await liveRes.json();
+
+      const winnerRes = await fetch(`http://127.0.0.1:8000/predict/winner-live?date=${date}`);
+      if (!winnerRes.ok) throw new Error('Unable to derive control edge');
+      const winner: WinnerLiveResponse = await winnerRes.json();
+
+      if (winner.message) {
+        setMessage(winner.message);
+        setDecision(null);
+        return;
+      }
+      if (winner.error) {
+        setMessage(winner.error);
+        setDecision(null);
+        return;
+      }
+
+      const battingTeam = liveState.batting_team || '';
+      const winProb = winner.win_probability || {};
+      const battingWin = battingTeam && winProb[battingTeam] !== undefined ? winProb[battingTeam] : 50;
+      const winEdge = (battingWin - 50) / 50;
+
+      const overs = typeof liveState.overs === 'number' ? liveState.overs : typeof winner.overs === 'number' ? winner.overs : 0;
+      const runs = typeof liveState.runs === 'number' ? liveState.runs : typeof winner.current_score === 'number' ? winner.current_score : 0;
+      const wickets =
+        typeof liveState.wickets === 'number' ? liveState.wickets : typeof winner.wickets === 'number' ? winner.wickets : 0;
+      const currentRunRate = overs > 0 ? runs / overs : 0;
+
+      const assistRes = await fetch('http://127.0.0.1:8000/assist/decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          match_key: `${date}-${matchNumber}`,
+          runs,
+          wickets,
+          overs,
+          current_run_rate: currentRunRate,
+          win_edge: winEdge,
+          risk_mode: riskMode,
+        }),
+      });
+      if (!assistRes.ok) throw new Error('Unable to fetch decision');
+      const decisionData: DecisionResponse = await assistRes.json();
+      setDecision(decisionData);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setResult('❌ Error: ' + message);
+      const msg = err instanceof Error ? err.message : String(err);
+      setMessage(msg);
+      setDecision(null);
     } finally {
       setLoading(false);
     }
   };
 
-  // const handleSubscribe = async () => {
-  //   if (!currentUser) return navigate('/auth');
-  //   setLoading(true);
-  //   try {
-  //     const response = await fetch('http://localhost:5000/create-checkout-session', {
-  //       method: 'POST',
-  //       headers: { 'Content-Type': 'application/json' },
-  //       body: JSON.stringify({ userId: currentUser.uid }),
-  //     });
-  //     const { url } = await response.json();
-  //     window.location.href = url;
-  //   } catch (error) {
-  //     console.error('Checkout session error:', error);
-  //     setLoading(false);
-  //   }
-  // };
-
-  if (authLoading) {
-    return <Typography color="white">Loading...</Typography>;
-  }
+  if (authLoading) return <Typography color="white">Loading...</Typography>;
 
   return (
     <Box
       sx={{
-        backgroundImage: `url(${homeBg})`,
+        backgroundImage: `linear-gradient(rgba(13,17,23,0.92), rgba(13,17,23,0.92)), url(${homeBg})`,
         backgroundSize: 'cover',
         backgroundPosition: 'center',
         minHeight: '100vh',
-        color: 'white',
+        color: palette.primary,
         fontFamily: 'Orbitron, sans-serif',
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'flex-start',
         alignItems: 'center',
-        textAlign: 'center',
-        pt: 10,
-        pb: 12,
-        px: 2,  // Added for responsive fix
+        pt: 9,
+        pb: 10,
+        px: 2,
       }}
     >
-      <Typography
-        variant="h3"
-        sx={{
-          color: '#FFD700',
-          fontWeight: 'bold',
-          mb: 3,
-          fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' }, // Added for responsive fix
-          textAlign: 'center',
-        }}
-      >
-        Live Match Predictions
+      <Typography variant="h4" sx={{ fontWeight: 700, mb: 1, textAlign: 'center' }}>
+        Live Decision Assistant
+      </Typography>
+      <Typography sx={{ color: palette.muted, mb: 4, textAlign: 'center' }}>
+        One action per leverage moment. Silence when no edge.
       </Typography>
 
-      {currentUser ? (
-        <>
-          <Box sx={{ textAlign: 'center', mb: 3 }}>
-            <Typography variant="h6" sx={{ color: '#FFD700', mb: 1 }}>
-              Select Match
-            </Typography>
-            <select
-              value={matchNumber}
-              onChange={(e) => setMatchNumber(Number(e.target.value))}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '8px',
-                fontSize: '1rem',
-                fontFamily: 'Orbitron, sans-serif',
-              }}
-            >
-              <option value={0}>Match 1</option>
-              <option value={1}>Match 2</option>
-            </select>
+      {!currentUser ? (
+        <Typography variant="h6">Please sign in to access live match decisions.</Typography>
+      ) : (
+        <Paper
+          elevation={0}
+          sx={{
+            width: '100%',
+            maxWidth: 760,
+            p: { xs: 2, sm: 3 },
+            borderRadius: 3,
+            backgroundColor: palette.card,
+            border: `1px solid ${palette.border}`,
+          }}
+        >
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-between', alignItems: 'center' }}>
+            <Box>
+              <Typography sx={{ color: palette.muted, mb: 0.5 }}>Match</Typography>
+              <select
+                value={matchNumber}
+                onChange={(e) => setMatchNumber(Number(e.target.value))}
+                style={{
+                  background: '#0f172a',
+                  color: '#e2e8f0',
+                  border: `1px solid ${palette.border}`,
+                  borderRadius: 8,
+                  padding: '8px 10px',
+                }}
+              >
+                <option value={0}>Match 1</option>
+                <option value={1}>Match 2</option>
+              </select>
+            </Box>
+
+            <Box>
+              <Typography sx={{ color: palette.muted, mb: 0.5 }}>Risk Mode</Typography>
+              <ToggleButtonGroup
+                value={riskMode}
+                exclusive
+                onChange={(_, v) => v && setRiskMode(v)}
+                size="small"
+                sx={{ background: '#0f172a', borderRadius: 2 }}
+              >
+                <ToggleButton value="conservative" sx={{ color: palette.primary }}>
+                  Conservative
+                </ToggleButton>
+                <ToggleButton value="balanced" sx={{ color: palette.primary }}>
+                  Balanced
+                </ToggleButton>
+                <ToggleButton value="aggressive" sx={{ color: palette.primary }}>
+                  Aggressive
+                </ToggleButton>
+              </ToggleButtonGroup>
+            </Box>
           </Box>
 
-          <Stack
-            spacing={2}
-            direction={{ xs: 'column', sm: 'row' }}  // Added for responsive fix
-            sx={{ flexWrap: 'wrap', justifyContent: 'center', mb: 4 }}
+          <Button
+            onClick={getDecision}
+            disabled={loading}
+            variant="contained"
+            sx={{
+              mt: 3,
+              mb: 3,
+              borderRadius: 8,
+              px: 3,
+              py: 1.2,
+              backgroundColor: '#0ea5e9',
+              fontWeight: 700,
+              textTransform: 'none',
+            }}
           >
-            {/* Prediction Buttons */}
-            {[
-              { label: 'LIVE WINNER', icon: <LiveTvIcon />, endpoint: '/predict/winner-live' },
-              { label: 'LIVE POWERPLAY', icon: <FlashOnIcon />, endpoint: '/predict/powerplay-live' },
-              { label: 'LIVE SCORE', icon: <ScoreboardIcon />, endpoint: '/predict/score-live' },
-              { label: 'LIVE WICKETS', icon: <WbSunnyIcon />, endpoint: '/predict/wickets-live' },
-            ].map((btn) => (
-              <Button
-                key={btn.label}
-                variant="contained"
-                onClick={() => handleLivePrediction(btn.endpoint)}
-                startIcon={btn.icon}
-                sx={{
-                  background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
-                  borderRadius: '30px',
-                  px: 4,
-                  py: 2,
-                  minWidth: { xs: '120px', sm: '150px' },  // Added for responsive fix
-                  fontSize: { xs: '0.8rem', sm: '1rem' },  // Added for responsive fix
-                  fontWeight: 'bold',
-                  fontFamily: 'Orbitron, sans-serif',
-                  color: 'white',
-                  boxShadow: '0 0 15px rgba(255, 111, 97, 0.6)',
-                  '&:hover': {
-                    background: 'linear-gradient(90deg, #FF3CAC 0%, #FF6F61 100%)',
-                  },
-                }}
-              >
-                {btn.label}
-              </Button>
-            ))}
-          </Stack>
+            {loading ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : 'Get Live Decision'}
+          </Button>
 
-          {loading && (
-            <Typography align="center" sx={{ color: '#ffca28' }}>
-              ⏳ Processing...
+          {message && (
+            <Typography sx={{ color: palette.muted, mb: 2 }}>
+              {message}
             </Typography>
           )}
 
-          {result && (
-            <Paper
-              elevation={5}
-              sx={{
-                mt: 4,
-                px: { xs: 2, sm: 4 },  // Added for responsive fix
-                py: { xs: 2, sm: 3 },  // Added for responsive fix
-                maxWidth: { xs: '90%', sm: '85%' },  // Added for responsive fix
-                background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
-                border: '2px solid #FFD700',
-                borderRadius: '20px',
-                boxShadow: '0 0 20px #FFD70088',
-                color: '#fff',
-                overflowX: 'auto',
-                fontFamily: 'Orbitron, monospace',
-                '&:hover': {
-                  boxShadow: '0 0 30px #FF3CAC99',
-                  borderColor: '#FF3CAC',
-                },
-              }}
-            >
+          {decision && (
+            <Box>
+              <Divider sx={{ borderColor: palette.border, mb: 2 }} />
+              <Typography sx={{ color: palette.muted, fontSize: 13 }}>Recommendation</Typography>
               <Typography
-                variant="h6"
+                variant="h3"
                 sx={{
-                  color: '#FFD700',
-                  fontWeight: 'bold',
-                  fontSize: '1.2rem',
-                  mb: 2,
-                  textAlign: 'center',
+                  mt: 0.5,
+                  fontWeight: 800,
+                  color: decision.silent ? palette.silent : directionColor(decision.recommendation.direction),
                 }}
               >
-                🎯 Prediction Result
+                {decision.silent ? 'Hold' : decision.recommendation.direction}
               </Typography>
-              <Box
-                component="pre"
-                sx={{
-                  whiteSpace: 'pre-wrap',
-                  fontSize: '0.95rem',
-                  textAlign: 'left',
-                  color: '#00E5FF',
-                }}
+
+              <Typography sx={{ mt: 1, color: palette.primary }}>
+                {decision.silent ? 'No action. System is intentionally silent.' : decision.recommendation.action}
+              </Typography>
+              <Typography sx={{ mt: 0.5, color: palette.muted }}>
+                Moment: {decision.recommendation.moment.replace(/_/g, ' ')}
+              </Typography>
+              <Typography sx={{ mt: 0.5, color: palette.accent }}>
+                Next leverage window: {decision.next_window_in}
+              </Typography>
+
+              {decision.silent && decision.silent_reason && (
+                <Typography sx={{ mt: 1, color: palette.muted }}>{decision.silent_reason}</Typography>
+              )}
+
+              <Button
+                variant="text"
+                onClick={() => setShowWhy((v) => !v)}
+                sx={{ mt: 1, px: 0, textTransform: 'none', color: palette.primary }}
               >
-                {result}
-              </Box>
-            </Paper>
+                {showWhy ? 'Hide why' : 'Show why'}
+              </Button>
+              {showWhy && (
+                <Typography sx={{ color: palette.muted }}>
+                  {decision.micro_why}
+                </Typography>
+              )}
+            </Box>
           )}
-        </>
-      ) : (
-        <Typography variant="h6" mt={6}>
-          🔒 Please sign in to access live match predictions.
-        </Typography>
+        </Paper>
       )}
 
-      {/* Disclaimer */}
       <Box
         sx={{
           position: 'fixed',
           bottom: 0,
           width: '100%',
           textAlign: 'center',
-          p: { xs: 1, sm: 2 },  // Added for responsive fix
-          backgroundColor: 'rgba(0,0,0,0.6)',
-          zIndex: 10,
+          p: { xs: 1, sm: 1.5 },
+          backgroundColor: 'rgba(2,6,23,0.9)',
+          borderTop: `1px solid ${palette.border}`,
         }}
       >
-        <Divider sx={{ borderColor: 'white', mb: 1 }} />
-        <Typography variant="body2" color="white" fontFamily="Orbitron, sans-serif">
-          ⚠️ FantasyFuel.ai is intended for entertainment and informational purposes only.
-          Predictions should not be used for betting or gambling.
+        <Typography variant="body2" color={palette.muted}>
+          Entertainment only. Do not use for betting or gambling.
         </Typography>
       </Box>
     </Box>

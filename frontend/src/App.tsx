@@ -8,6 +8,7 @@ import PreMatchPage from './pages/PreMatchPage';
 import LiveMatchPage from './pages/LiveMatchPage';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage'; // ✅ Ensure this path is correct
+import T20WorldCupPage from './pages/T20WorldCupPage';
 import { AuthProvider } from './context/AuthContext';
 
 const AppContent: React.FC = () => {
@@ -29,6 +30,7 @@ const AppContent: React.FC = () => {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/cricket/ipl" element={<PreMatchPage />} />
+        <Route path="/cricket/t20-world-cup" element={<T20WorldCupPage />} />
         <Route path="/live" element={<LiveMatchPage />} />
         <Route path="/auth" element={<AuthPage />} />
       </Routes>

@@ -15,8 +15,6 @@ import {
   Divider,
 } from "@mui/material";
 import LoginIcon from "@mui/icons-material/Login";
-
-// Import images
 import homeBg from "../non-home.png";
 import soccerIcon from "../soccer.png";
 import nflIcon from "../nfl.png";
@@ -36,22 +34,13 @@ const HomePage: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedSport, setSelectedSport] = useState("");
 
-  const handleCardClick = (sport: string, event: React.MouseEvent) => {
+  const handleCardClick = (sport: string, event: React.MouseEvent<HTMLElement>) => {
     if (sport === "Cricket") {
-      setAnchorEl(event.currentTarget as HTMLElement);
-      navigate("/cricket/ipl");
-    } else {
-      setSelectedSport(sport);
-      setDialogOpen(true);
+      setAnchorEl(event.currentTarget);
+      return;
     }
-  };
-
-  const handleDialogClose = () => {
-    setDialogOpen(false);
-  };
-
-  const handleSignInClick = () => {
-    navigate("/auth");
+    setSelectedSport(sport);
+    setDialogOpen(true);
   };
 
   return (
@@ -59,39 +48,31 @@ const HomePage: React.FC = () => {
       sx={{
         position: "relative",
         minHeight: "100vh",
-        backgroundImage: `url(${homeBg})`,
+        backgroundImage: `linear-gradient(rgba(13,17,23,0.88), rgba(13,17,23,0.88)), url(${homeBg})`,
         backgroundSize: "cover",
         backgroundPosition: "center",
         color: "white",
         overflow: "hidden",
       }}
     >
-      {/* Top Right Sign In */}
       <Box sx={{ position: "absolute", top: 16, right: 16 }}>
-        <IconButton onClick={handleSignInClick} sx={{ color: "white" }}>
+        <IconButton onClick={() => navigate("/auth")} sx={{ color: "white" }}>
           <LoginIcon />
         </IconButton>
       </Box>
 
-      {/* Title and Subtitle */}
-      <Box
-        sx={{
-          textAlign: "center",
-          pt: { xs: 8, sm: 12 },
-        }}
-      >
+      <Box sx={{ textAlign: "center", pt: { xs: 8, sm: 12 }, px: 2 }}>
         <Typography
           variant="h4"
-          sx={{ fontWeight: "bold", mb: 1, fontFamily: "Orbitron, sans-serif" }}
+          sx={{ fontWeight: 700, mb: 1, fontFamily: "Orbitron, sans-serif" }}
         >
-          Welcome to FantasyFuel.ai
+          FantasyFuel.ai
         </Typography>
-        <Typography variant="subtitle1">
-          Fuel your fantasy sports predictions!
+        <Typography variant="subtitle1" sx={{ color: "#94a3b8" }}>
+          Make calmer fantasy decisions in real time.
         </Typography>
       </Box>
 
-      {/* Clickable Sports Cards */}
       <Box
         sx={{
           mt: { xs: 6, sm: 10 },
@@ -109,8 +90,9 @@ const HomePage: React.FC = () => {
             key={sport.name}
             onClick={(e) => handleCardClick(sport.name, e)}
             sx={{
-              backgroundColor: "rgba(0,0,0,0.7)",
+              backgroundColor: "rgba(15,23,42,0.92)",
               borderRadius: "12px",
+              border: "1px solid #334155",
               boxShadow: "0px 4px 10px rgba(0,0,0,0.5)",
               width: { xs: "120px", sm: "140px", md: "160px" },
               height: { xs: "140px", sm: "160px", md: "180px" },
@@ -126,33 +108,53 @@ const HomePage: React.FC = () => {
             }}
           >
             <img
-  src={sport.icon}
-  alt={sport.name}
-  style={{ 
-    width: "100%",   
-    height: "100%", 
-    objectFit: "contain"
-  }}
-/>
-
+              src={sport.icon}
+              alt={sport.name}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+              }}
+            />
           </Box>
         ))}
       </Box>
 
-      {/* Coming Soon Dialog */}
-      <Dialog open={dialogOpen} onClose={handleDialogClose}>
-        <DialogTitle>{selectedSport} - Coming Soon!</DialogTitle>
+      <Menu
+        anchorEl={anchorEl}
+        open={Boolean(anchorEl)}
+        onClose={() => setAnchorEl(null)}
+      >
+        <MenuItem
+          onClick={() => {
+            setAnchorEl(null);
+            navigate("/cricket/ipl");
+          }}
+        >
+          IPL
+        </MenuItem>
+        <MenuItem
+          onClick={() => {
+            setAnchorEl(null);
+            navigate("/cricket/t20-world-cup");
+          }}
+        >
+          T20 World Cup
+        </MenuItem>
+      </Menu>
+
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)}>
+        <DialogTitle>{selectedSport} - Coming Soon</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            We’re working on {selectedSport} predictions. Stay tuned!
+            We are building {selectedSport} decision support next.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleDialogClose}>OK</Button>
+          <Button onClick={() => setDialogOpen(false)}>OK</Button>
         </DialogActions>
       </Dialog>
 
-      {/* Disclaimer */}
       <Box
         sx={{
           position: "absolute",
@@ -160,13 +162,13 @@ const HomePage: React.FC = () => {
           width: "100%",
           textAlign: "center",
           p: { xs: 1, sm: 2 },
-          backgroundColor: "rgba(0,0,0,0.6)",
+          backgroundColor: "rgba(2,6,23,0.92)",
+          borderTop: "1px solid #334155",
         }}
       >
         <Divider />
-        <Typography variant="body2" color="white" mt={1}>
-          ⚠️ FantasyFuel.ai is intended for entertainment and informational
-          purposes only. Predictions should not be used for betting or gambling.
+        <Typography variant="body2" color="#94a3b8" mt={1}>
+          Entertainment only. Do not use for betting or gambling.
         </Typography>
       </Box>
     </Box>

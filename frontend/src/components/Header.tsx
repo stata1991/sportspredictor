@@ -1,25 +1,31 @@
 import React from 'react';
-import { AppBar, Tabs, Tab, Toolbar, Typography, Button, Box, IconButton } from '@mui/material';
+import { AppBar, Tabs, Tab, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { auth } from '../firebase';
 import { signOut } from 'firebase/auth';
 import LoginIcon from '@mui/icons-material/Login';
 import LogoutIcon from '@mui/icons-material/Logout';
+import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 
 const Header: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser } = useAuth();
+  const [cricketAnchorEl, setCricketAnchorEl] = React.useState<null | HTMLElement>(null);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: string) => {
+    if (newValue === '/cricket-menu') {
+      setCricketAnchorEl(event.currentTarget as HTMLElement);
+      return;
+    }
     navigate(newValue);
   };
 
   const currentTab = location.pathname.startsWith('/live')
     ? '/live'
-    : location.pathname.startsWith('/cricket/ipl')
-    ? '/cricket/ipl'
+    : location.pathname.startsWith('/cricket/')
+    ? '/cricket-menu'
     : '/';
 
   const handleSignOut = async () => {
@@ -52,7 +58,7 @@ const Header: React.FC = () => {
       >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Typography variant="h6" sx={{ color: 'white', mr: 2, fontFamily: 'Orbitron, sans-serif' }}>
-            IPL Predictor
+            Fantasy Decision Assistant
           </Typography>
           {showHomeButton && (
             <Button
@@ -80,7 +86,16 @@ const Header: React.FC = () => {
             maxWidth: '100%',  // Added for responsive fix
           }}
         >
-          <Tab label="Pre-Match" value="/cricket/ipl" sx={{ color: 'white' }} />
+          <Tab
+            label={
+              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                Cricket
+                <ArrowDropDownIcon fontSize="small" />
+              </Box>
+            }
+            value="/cricket-menu"
+            sx={{ color: 'white' }}
+          />
           <Tab label="Live Match" value="/live" sx={{ color: 'white' }} />
           {currentUser ? (
             <Tab label="Sign Out" onClick={handleSignOut} sx={{ color: 'white' }} />
@@ -88,6 +103,28 @@ const Header: React.FC = () => {
             <Tab label="Sign In" value="/auth" sx={{ color: 'white' }} />
           )}
         </Tabs>
+        <Menu
+          anchorEl={cricketAnchorEl}
+          open={Boolean(cricketAnchorEl)}
+          onClose={() => setCricketAnchorEl(null)}
+        >
+          <MenuItem
+            onClick={() => {
+              setCricketAnchorEl(null);
+              navigate('/cricket/ipl');
+            }}
+          >
+            IPL
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              setCricketAnchorEl(null);
+              navigate('/cricket/t20-world-cup');
+            }}
+          >
+            T20 World Cup
+          </MenuItem>
+        </Menu>
 
         <Box>
           {currentUser ? (

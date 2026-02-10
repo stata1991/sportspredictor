@@ -87,7 +87,7 @@ const PreMatchPage: React.FC = () => {
           textAlign: 'center',
         }}
       >
-        Pre-Match Predictions
+        Pre-Match Decision Prep
       </Typography>
 
       <Box sx={{ mt: 3 }}>
@@ -182,7 +182,7 @@ const PreMatchPage: React.FC = () => {
                 textAlign: 'center',
               }}
             >
-              🎯 Prediction Result
+              🎯 Decision Output
             </Typography>
             <Box
               component="pre"
@@ -214,7 +214,7 @@ const PreMatchPage: React.FC = () => {
         <Divider sx={{ borderColor: 'white', mb: 1 }} />
         <Typography variant="body2" color="white" fontFamily="Orbitron, sans-serif">
           ⚠️ FantasyFuel.ai is intended for entertainment and informational purposes only.
-          Predictions should not be used for betting or gambling.
+          Decisions should not be used for betting or gambling.
         </Typography>
       </Box>
     </Box>

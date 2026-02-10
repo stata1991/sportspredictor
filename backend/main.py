@@ -24,6 +24,14 @@ from backend.prediction_engine import (
 )
 
 from backend.live_data_provider import get_todays_match, get_match_details, fetch_live_data,IPL_TEAMS,get_match_by_date,get_first_innings_score,get_todays_matches
+from backend.decision_engine import (
+    DecisionMoment,
+    MatchState,
+    NoiseSuppressor,
+    RiskMode,
+    TRIGGER_RULES,
+    evaluate_decision,
+)
 
 
 
@@ -36,7 +44,7 @@ recent_deliveries_df = recent_deliveries_df.merge(
 )
 
 recent_router = APIRouter()
-app = FastAPI(title="IPL Live Match Predictor", version="1.0")
+app = FastAPI(title="IPL Real-Time Fantasy Decision Assistant", version="2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,6 +78,21 @@ class LiveMatchStateRequest(BaseModel):
     wickets: Optional[int] = 0
     overs: Optional[float] = 0.0
     batsmen: Optional[List[str]] = []
+
+
+class DecisionAssistRequest(BaseModel):
+    match_key: str
+    runs: int
+    wickets: int
+    overs: float
+    current_run_rate: float
+    win_edge: float = 0.0
+    target: Optional[int] = None
+    required_run_rate: Optional[float] = None
+    risk_mode: RiskMode = RiskMode.BALANCED
+
+
+decision_suppressor = NoiseSuppressor(minimum_delta=0.08, cooldown_seconds=45)
 
 @app.post("/update-match-context")
 def update_match_context_endpoint(date: str = datetime.utcnow().strftime("%Y-%m-%d"), match_number: int = 0):
@@ -657,6 +680,43 @@ def list_matches(date: str):
             } for i, match in enumerate(matches)
         ]
     }
+
+
+@app.get("/assist/moments")
+def list_decision_moments():
+    return {
+        "product_mode": "real_time_fantasy_decision_assistant",
+        "job_statement": "Reduce regret at decision moments.",
+        "moments": [moment.value for moment in DecisionMoment],
+        "trigger_rules": [
+            {
+                "moment": rule.moment.value,
+                "condition": rule.condition,
+                "confidence_floor": rule.confidence_floor,
+            }
+            for rule in TRIGGER_RULES
+        ],
+    }
+
+
+@app.post("/assist/decision")
+def assist_decision(payload: DecisionAssistRequest):
+    state = MatchState(
+        runs=payload.runs,
+        wickets=payload.wickets,
+        overs=payload.overs,
+        target=payload.target,
+        current_run_rate=payload.current_run_rate,
+        required_run_rate=payload.required_run_rate,
+        win_edge=payload.win_edge,
+    )
+    _, result = evaluate_decision(
+        match_key=payload.match_key,
+        state=state,
+        risk_mode=payload.risk_mode,
+        suppressor=decision_suppressor,
+    )
+    return result
 
 
 
