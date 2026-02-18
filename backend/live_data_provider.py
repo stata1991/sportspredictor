@@ -3,19 +3,68 @@ import requests
 from datetime import datetime
 from dotenv import load_dotenv
 import logging
-import json
+from backend.cache import cache
+from backend.config import SERIES_TTL, MATCH_INFO_TTL, OVERS_TTL, SCORECARD_TTL
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-load_dotenv()
+class UpstreamError(Exception):
+    def __init__(self, status_code: int, message: str = "Upstream API unavailable"):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _cached_get_json(url: str, headers: dict, cache_key: str, ttl: int):
+    def loader():
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            return {"_error": response.status_code, "_body": response.text}
+        return response.json()
+
+    lock = cache.with_singleflight_lock(cache_key)
+    with lock:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+        data = loader()
+        if not (isinstance(data, dict) and data.get("_error")):
+            cache.set(cache_key, data, ttl)
+        return data
+
+
+def _stale_cached_get_json(url: str, headers: dict, cache_key: str, ttl: int, stale_ttl: int):
+    """Fetch with stale-while-revalidate semantics for rarely-changing data like series info."""
+    def loader():
+        response = requests.get(url, headers=headers)
+        if response.status_code != 200:
+            raise UpstreamError(response.status_code, response.text)
+        return response.json()
+
+    return cache.stale_while_revalidate(cache_key, ttl, stale_ttl, loader)
+
+
+ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(ENV_PATH)
 
 BASE_URL = "https://Cricbuzz-Official-Cricket-API.proxy-production.allthingsdev.co"
-API_HEADERS = {
+API_HEADERS_BASE = {
     "x-apihub-key": os.getenv("CRICKETDATA_API_KEY"),
-    "x-apihub-host": "Cricbuzz-Official-Cricket-API.allthingsdev.co"
+    "x-apihub-host": "Cricbuzz-Official-Cricket-API.allthingsdev.co",
 }
+SERIES_ENDPOINT = "661c6b89-b558-41fa-9553-d0aca64fcb6f"
+MATCH_INFO_ENDPOINT = "ac951751-d311-4d23-8f18-353e75432353"
+SCORECARD_ENDPOINT = os.getenv("CRICBUZZ_SCORECARD_ENDPOINT")
+if API_HEADERS_BASE["x-apihub-key"]:
+    logger.info("CRICKETDATA_API_KEY loaded (len=%s)", len(API_HEADERS_BASE["x-apihub-key"]))
+else:
+    logger.warning("CRICKETDATA_API_KEY is not set")
+
+
+def _headers_with_endpoint(endpoint_id: str):
+    headers = dict(API_HEADERS_BASE)
+    headers["x-apihub-endpoint"] = endpoint_id
+    return headers
 
 IPL_TEAMS = [
     "Chennai Super Kings", "Mumbai Indians", "Rajasthan Royals",
@@ -26,43 +75,157 @@ IPL_TEAMS = [
 
 SERIES_ID = 9237
 
-def fetch_series_matches():
-    API_HEADERS["x-apihub-endpoint"] = "661c6b89-b558-41fa-9553-d0aca64fcb6f"
-    url = f"{BASE_URL}/series/{SERIES_ID}"
-    response = requests.get(url, headers=API_HEADERS)
-    if response.status_code != 200:
-        print(f"Error fetching series matches: {response.status_code}")
-        return []
+T20WC_SERIES_ID = int(os.getenv('T20WC_SERIES_ID', '0') or 0)
 
-    data = response.json()
+
+
+def fetch_series_matches_for_id(series_id: int):
+    url = f"{BASE_URL}/series/{series_id}"
+    cache_key = f"cb:series:{series_id}:info:v1"
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
+
     matches = []
     for day in data.get("matchDetails", []):
         for match in day["matchDetailsMap"]["match"]:
-            matches.append(match["matchInfo"])
-    
+            matches.append(match)
+
     return matches
 
 
-# Fetch today's IPL match from Cricbuzz API
+def get_match_by_date_for_series(date_str: str, series_id: int):
+    date_requested = datetime.strptime(date_str, "%Y-%m-%d").strftime("%a, %d %b %Y")
+    matches = fetch_series_matches_for_id(series_id)
+
+    for match in matches:
+        info = match.get("matchInfo", match)
+        match_date = datetime.utcfromtimestamp(int(info["startDate"]) / 1000).strftime("%a, %d %b %Y")
+        if match_date == date_requested and info["matchFormat"] == "T20":
+            return {
+                "match_id": info["matchId"],
+                "team1": info["team1"]["teamName"],
+                "team2": info["team2"]["teamName"],
+                "venue": info["venueInfo"]["ground"],
+                "status": info["status"],
+                "date": match_date
+            }
+
+    logger.info("No match found for this date")
+    return None
+
+
+def fetch_live_data_for_series(date_str: str, series_id: int, teams_filter=None):
+    url = f"{BASE_URL}/series/{series_id}"
+    cache_key = f"cb:series:{series_id}:info:v1"
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
+
+    formatted_date = datetime.strptime(date_str, "%Y-%m-%d").strftime('%a, %d %b %Y')
+    logger.info("Formatted date for match key: %s", formatted_date)
+    match_details_days = data.get("matchDetails", [])
+    matches_today = []
+
+    for day in match_details_days:
+        match_day = day.get("matchDetailsMap", {})
+        key = match_day.get("key")
+        if key == formatted_date:
+            logger.info("Found match_day for %s", formatted_date)
+            for match in match_day.get("match", []):
+                match_info = match["matchInfo"]
+                if match_info["matchFormat"] != "T20":
+                    continue
+                if teams_filter:
+                    if (match_info["team1"]["teamName"] not in teams_filter and
+                            match_info["team2"]["teamName"] not in teams_filter):
+                        continue
+                matches_today.append(match_info)
+
+    logger.info("Found %d T20 matches for %s", len(matches_today), date_str)
+    return matches_today
+
+
+def get_todays_matches_for_series(date_str: str, series_id: int):
+    return fetch_live_data_for_series(date_str, series_id)
+
+
+def get_match_context_by_number_for_series(date_str: str, match_number: int, series_id: int):
+    matches = fetch_live_data_for_series(date_str, series_id)
+
+    if match_number >= len(matches):
+        raise IndexError(f"Only {len(matches)} matches found for {date_str}. match_number={match_number} is invalid.")
+
+    match = matches[match_number]
+    match_id = match["matchId"]
+
+    match_details = get_match_details(match_id)
+    if not match_details:
+        raise ValueError(f"Could not load details for match_id: {match_id}")
+
+    return {
+        "match_id": match_id,
+        "team1": match["team1"]["teamName"],
+        "team2": match["team2"]["teamName"],
+        "venue": match["venueInfo"]["ground"],
+        "status": match.get("status", "Preview"),
+        "date": datetime.utcfromtimestamp(match["startDate"] / 1000).strftime("%a, %d %b %Y"),
+        "playing_11": match_details.get("playing_11", {}),
+        "squads": match_details.get("squads", {}),
+        "toss_winner": match_details.get("toss_winner", ""),
+        "toss_decision": match_details.get("toss_decision", ""),
+        "innings": match_details.get("innings", []),
+        "powerplay": match_details.get("powerplay", {})
+    }
+
+
+def get_first_innings_score_for_series(date: str, series_id: int) -> int:
+    match_info = get_match_by_date_for_series(date, series_id)
+    if not match_info:
+        logger.warning("No match info for date %s", date)
+        return 0
+
+    match_id = match_info.get("match_id")
+    match_details = get_match_details(match_id)
+    if not match_details:
+        logger.warning("No match details for match_id %s", match_id)
+        return 0
+
+    innings = match_details.get("innings", [])
+    if not innings:
+        logger.warning("No innings data found for match %s", match_id)
+        return 0
+
+    first_innings = min(innings, key=lambda x: x.get("inningsId", 1))
+    return first_innings.get("score", 0)
+
+
+def fetch_series_matches():
+    url = f"{BASE_URL}/series/{SERIES_ID}"
+    cache_key = f"cb:series:{SERIES_ID}:info:v1"
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
+
+    matches = []
+    for day in data.get("matchDetails", []):
+        for match in day["matchDetailsMap"]["match"]:
+            matches.append(match)
+
+    return matches
+
+
 def get_todays_match():
     today_str = datetime.utcnow().strftime('%a, %d %b %Y')
-    API_HEADERS["x-apihub-endpoint"] = "661c6b89-b558-41fa-9553-d0aca64fcb6f"
     url = f"{BASE_URL}/series/{SERIES_ID}"
-    response = requests.get(url, headers=API_HEADERS)
+    cache_key = f"cb:series:{SERIES_ID}:info:v1"
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
 
-    if response.status_code != 200:
-        print(f"❌ Error fetching today's matches: {response.status_code}")
-        return None
+    match_maps = data.get("matchDetailsMap", data.get("matchDetails", []))
 
-    match_maps = response.json().get("matchDetailsMap", [])
-   
     for match_day in match_maps:
-        if match_day['key'] == today_str:
-            for match in match_day['match']:
-                match_info = match["matchInfo"]
-                if (match_info['matchFormat'] == 'T20' and
-                    (match_info['team1']['teamName'] in IPL_TEAMS or
-                     match_info['team2']['teamName'] in IPL_TEAMS)):
+        day_map = match_day.get("matchDetailsMap", match_day)
+        key = day_map.get("key", match_day.get("key"))
+        if key == today_str:
+            for match in day_map.get("match", []):
+                match_info = match.get("matchInfo", match)
+                if (match_info.get("matchFormat") == "T20" and
+                    (match_info["team1"]["teamName"] in IPL_TEAMS or
+                     match_info["team2"]["teamName"] in IPL_TEAMS)):
                     return {
                         "match_id": match_info["matchId"],
                         "team1": match_info["team1"]["teamName"],
@@ -70,7 +233,7 @@ def get_todays_match():
                         "venue": match_info["venueInfo"]["ground"],
                         "date": datetime.utcfromtimestamp(match_info["startDate"] / 1000).isoformat()
                     }
-    print("⚠️ No IPL match found for today.")
+    logger.info("No IPL match found for today")
     return None
 
 def get_match_by_date(date_str: str):
@@ -78,68 +241,105 @@ def get_match_by_date(date_str: str):
     matches = fetch_series_matches()
 
     for match in matches:
-        match_date = datetime.utcfromtimestamp(int(match["startDate"]) / 1000).strftime("%a, %d %b %Y")
-        if match_date == date_requested and match["matchFormat"] == "T20":
+        info = match.get("matchInfo", match)
+        match_date = datetime.utcfromtimestamp(int(info["startDate"]) / 1000).strftime("%a, %d %b %Y")
+        if match_date == date_requested and info["matchFormat"] == "T20":
             return {
-                "match_id": match["matchId"],
-                "team1": match["team1"]["teamName"],
-                "team2": match["team2"]["teamName"],
-                "venue": match["venueInfo"]["ground"],
-                "status": match["status"],
+                "match_id": info["matchId"],
+                "team1": info["team1"]["teamName"],
+                "team2": info["team2"]["teamName"],
+                "venue": info["venueInfo"]["ground"],
+                "status": info["status"],
                 "date": match_date
             }
 
-    print("No match found for this date.")
+    logger.info("No match found for this date")
     return None
 
 
 # live_data_provider.py (only showing the corrected get_match_details)
 def get_match_details(match_id):
-    API_HEADERS["x-apihub-endpoint"] = "ac951751-d311-4d23-8f18-353e75432353"
     url = f"{BASE_URL}/match/{match_id}"
-    response = requests.get(url, headers=API_HEADERS)
+    cache_key = f"cb:match:{match_id}:info:v1"
+    data = _cached_get_json(url, _headers_with_endpoint(MATCH_INFO_ENDPOINT), cache_key, MATCH_INFO_TTL)
 
-    if response.status_code != 200:
-        logger.error(f"Error fetching match details: {response.status_code}")
+    if isinstance(data, dict) and data.get("_error"):
+        logger.error(f"Error fetching match details: {data.get('_error')}")
         return None
 
-    data = response.json().get("matchInfo", {})
+    data = data.get("matchInfo", {})
     if not data:
-        logger.warning("No match data available")
-        return None
+        logger.info("No match info available")
 
-    toss_winner = data["tossResults"].get("tossWinnerName", "")
-    toss_decision = data["tossResults"].get("decision", "")
+    toss_results = data.get("tossResults") or {}
+    toss_winner = toss_results.get("tossWinnerName", "")
+    toss_decision = toss_results.get("decision", "")
 
-    squads = {
-        data['team1']['name']: [player['fullName'] for player in data['team1']['playerDetails']],
-        data['team2']['name']: [player['fullName'] for player in data['team2']['playerDetails']]
-    }
+    team1 = data.get("team1", {})
+    team2 = data.get("team2", {})
 
-    playing_xi = {
-        data['team1']['name']: [
-            player['fullName'] for player in data['team1']['playerDetails'] if not player.get('substitute', True)
-        ],
-        data['team2']['name']: [
-            player['fullName'] for player in data['team2']['playerDetails'] if not player.get('substitute', True)
-        ]
-    }
+    squads = {}
+    playing_xi = {}
+    if team1 and team2:
+        squads = {
+            team1["name"]: [player["fullName"] for player in team1.get("playerDetails", [])],
+            team2["name"]: [player["fullName"] for player in team2.get("playerDetails", [])],
+        }
 
-    if len(playing_xi[data['team1']['name']]) < 11:
-        playing_xi[data['team1']['name']] = squads[data['team1']['name']]
-    if len(playing_xi[data['team2']['name']]) < 11:
-        playing_xi[data['team2']['name']] = squads[data['team2']['name']]
+        playing_xi = {
+            team1["name"]: [
+                player["fullName"] for player in team1.get("playerDetails", []) if not player.get("substitute", True)
+            ],
+            team2["name"]: [
+                player["fullName"] for player in team2.get("playerDetails", []) if not player.get("substitute", True)
+            ],
+        }
+
+        if len(playing_xi[team1["name"]]) < 11:
+            playing_xi[team1["name"]] = squads.get(team1["name"], [])
+        if len(playing_xi[team2["name"]]) < 11:
+            playing_xi[team2["name"]] = squads.get(team2["name"], [])
+
+    scorecard_innings = []
+    if SCORECARD_ENDPOINT:
+        scorecard_url = f"{BASE_URL}/match/{match_id}/scorecard"
+        scorecard_cache_key = f"cb:match:{match_id}:scorecard:v1"
+        scorecard_data = _cached_get_json(
+            scorecard_url,
+            _headers_with_endpoint(SCORECARD_ENDPOINT),
+            scorecard_cache_key,
+            SCORECARD_TTL,
+        )
+        if isinstance(scorecard_data, dict) and not scorecard_data.get("_error"):
+            for entry in scorecard_data.get("scorecard", []):
+                innings_id = entry.get("inningsId") or entry.get("inningsid")
+                team_name = entry.get("batTeamName") or entry.get("batteamname")
+                runs = entry.get("score")
+                wickets = entry.get("wickets")
+                overs = entry.get("overs")
+                if innings_id and team_name and runs is not None and wickets is not None and overs is not None:
+                    scorecard_innings.append(
+                        {
+                            "inningsId": innings_id,
+                            "batTeamName": team_name,
+                            "score": runs,
+                            "wickets": wickets,
+                            "overs": overs,
+                        }
+                    )
+        else:
+            logger.info("Scorecard endpoint not available or returned error.")
 
     overs_url = f"{BASE_URL}/match/{match_id}/overs"
-    overs_resp = requests.get(overs_url, headers=API_HEADERS)
+    overs_cache_key = f"cb:match:{match_id}:overs:0:v1"
+    overs_data = _cached_get_json(overs_url, _headers_with_endpoint(MATCH_INFO_ENDPOINT), overs_cache_key, OVERS_TTL)
 
-    innings = {}
+    innings = scorecard_innings or []
     powerplay = {}
 
-    if overs_resp.status_code == 200:
-        overs_data = overs_resp.json()
+    if isinstance(overs_data, dict) and not overs_data.get("_error"):
         match_score = overs_data.get("matchScoreDetails", {}).get("inningsScoreList", [])
-        if match_score:
+        if match_score and not innings:
             innings = match_score
             logger.info(f"Innings data: {match_score}")
 
@@ -152,19 +352,16 @@ def get_match_details(match_id):
                 overs = innings_entry["overs"]
                 runs = innings_entry["score"]
                 wickets = innings_entry["wickets"]
-                
-                # Powerplay logic
+
                 if overs <= 6:
                     powerplay[team_name] = {"runs": runs, "wickets": wickets}
                     logger.info(f"Powerplay for {team_name} (overs <= 6): runs={runs}, wickets={wickets}")
                 elif overs > 6:
-                    # Estimate powerplay if no specific data from ppData
                     pp_runs = pp_data.get("pp_1" if innings_entry["inningsId"] == 1 else "pp_2", {}).get("runsScored", 0)
                     if pp_runs:
                         powerplay[team_name] = {"runs": pp_runs, "wickets": 0}
                         logger.info(f"Powerplay for {team_name} from ppData: runs={pp_runs}, wickets=0")
                     else:
-                        # Fallback estimation
                         pp_runs = int(runs * 6 / overs)
                         pp_wickets = min(2, wickets)
                         powerplay[team_name] = {"runs": pp_runs, "wickets": pp_wickets}
@@ -174,36 +371,31 @@ def get_match_details(match_id):
     return {
         "toss_winner": toss_winner,
         "toss_decision": toss_decision,
-        "venue": data["venue"]["name"],
+        "venue": (data.get("venue") or {}).get("name", ""),
         "squads": squads,
         "playing_11": playing_xi,
-        "team1": data['team1']['name'],
-        "team2": data['team2']['name'],
+        "team1": team1.get("name", ""),
+        "team2": team2.get("name", ""),
         "innings": innings,
         "powerplay": powerplay
     }
 
 # Fetch live match data for given date (simplified for Cricbuzz API)
 def fetch_live_data(date_str: str):
-    API_HEADERS["x-apihub-endpoint"] = "661c6b89-b558-41fa-9553-d0aca64fcb6f"
     url = f"{BASE_URL}/series/{SERIES_ID}"
-    response = requests.get(url, headers=API_HEADERS)
+    cache_key = f"cb:series:{SERIES_ID}:info:v1"
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
 
-    if response.status_code != 200:
-        print(f"❌ Error fetching matches: {response.status_code}")
-        return []
-
-    
     formatted_date = datetime.strptime(date_str, "%Y-%m-%d").strftime('%a, %d %b %Y')
-    print(f"🔍 Formatted Date for Match Key: {formatted_date}")
-    match_details_days = response.json().get("matchDetails", [])
+    logger.info("Formatted date for match key: %s", formatted_date)
+    match_details_days = data.get("matchDetails", [])
     matches_today = []
 
     for day in match_details_days:
         match_day = day.get("matchDetailsMap", {})
         key = match_day.get("key")
         if key == formatted_date:
-            print(f"✅ Found match_day for {formatted_date}")
+            logger.info("Found match_day for %s", formatted_date)
             for match in match_day.get("match", []):
                 match_info = match["matchInfo"]
                 if (
@@ -212,28 +404,24 @@ def fetch_live_data(date_str: str):
                 ):
                     matches_today.append(match_info)
 
-    if matches_today:
-        print(f"✅ Found {len(matches_today)} IPL matches for {date_str}")
-    else:
-        print(f"⚠️ No IPL matches found for {date_str}")
-
+    logger.info("Found %d IPL matches for %s", len(matches_today), date_str)
     return matches_today
 
 def get_first_innings_score(date: str) -> int:
     match_info = get_match_by_date(date)
     if not match_info:
-        print(f"⚠️ No match info for date {date}")
+        logger.warning("No match info for date %s", date)
         return 0
     
     match_id = match_info.get("match_id")
     match_details = get_match_details(match_id)
     if not match_details:
-        print(f"⚠️ No match details for match_id {match_id}")
+        logger.warning("No match details for match_id %s", match_id)
         return 0
 
     innings = match_details.get("innings", [])
     if not innings:
-        print(f"⚠️ No innings data found for match {match_id}")
+        logger.warning("No innings data found for match %s", match_id)
         return 0
 
     # First innings will have the lower inningsId
@@ -273,5 +461,3 @@ def get_match_context_by_number(date_str: str, match_number: int = 0):
         "innings": match_details.get("innings", []),
         "powerplay": match_details.get("powerplay", {})
     }
-
-

@@ -69,7 +69,7 @@ const HomePage: React.FC = () => {
           FantasyFuel.ai
         </Typography>
         <Typography variant="subtitle1" sx={{ color: "#94a3b8" }}>
-          Make calmer fantasy decisions in real time.
+          Live fantasy predictions across match moments.
         </Typography>
       </Box>
 
@@ -147,7 +147,7 @@ const HomePage: React.FC = () => {
         <DialogTitle>{selectedSport} - Coming Soon</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            We are building {selectedSport} decision support next.
+            We are building {selectedSport} predictions next.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

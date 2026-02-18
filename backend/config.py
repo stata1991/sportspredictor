@@ -1,0 +1,15 @@
+import os
+
+CACHE_ENABLED = os.getenv("CACHE_ENABLED", "true").lower() in {"1", "true", "yes"}
+REDIS_URL = os.getenv("REDIS_URL")
+CACHE_NAMESPACE = os.getenv("CACHE_NAMESPACE", "sportspredictor")
+CACHE_VERSION = os.getenv("CACHE_VERSION", "v1")
+
+SERIES_TTL = 3600
+MATCH_INFO_TTL = 30
+OVERS_TTL = 8
+COMMENTARY_TTL = 8
+SCORECARD_TTL = 10
+FEATURE_TTL = 60
+PREDICTION_PRE_TTL = 120
+PREDICTION_LIVE_TTL = 8

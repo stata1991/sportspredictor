@@ -2,7 +2,7 @@ import React from 'react';
 import { AppBar, Tabs, Tab, Toolbar, Typography, Button, Box, IconButton, Menu, MenuItem } from '@mui/material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { auth } from '../firebase';
+import { auth, firebaseEnabled } from '../firebase';
 import { signOut } from 'firebase/auth';
 import LoginIcon from '@mui/icons-material/Login';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -30,6 +30,10 @@ const Header: React.FC = () => {
 
   const handleSignOut = async () => {
     try {
+      if (!firebaseEnabled || !auth) {
+        navigate('/');
+        return;
+      }
       await signOut(auth);
       navigate('/');
     } catch (error) {
@@ -58,7 +62,7 @@ const Header: React.FC = () => {
       >
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Typography variant="h6" sx={{ color: 'white', mr: 2, fontFamily: 'Orbitron, sans-serif' }}>
-            Fantasy Decision Assistant
+            Fantasy Prediction Hub
           </Typography>
           {showHomeButton && (
             <Button
@@ -96,7 +100,7 @@ const Header: React.FC = () => {
             value="/cricket-menu"
             sx={{ color: 'white' }}
           />
-          <Tab label="Live Match" value="/live" sx={{ color: 'white' }} />
+          <Tab label="Live Predictions" value="/live" sx={{ color: 'white' }} />
           {currentUser ? (
             <Tab label="Sign Out" onClick={handleSignOut} sx={{ color: 'white' }} />
           ) : (

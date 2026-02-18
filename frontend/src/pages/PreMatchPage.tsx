@@ -1,34 +1,81 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Box, Typography, Button, Divider, Paper } from '@mui/material';
 import SportsCricketIcon from '@mui/icons-material/SportsCricket';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import WbSunnyIcon from '@mui/icons-material/WbSunny';
+import api from '../api';
 import homeBg from '../non-home.png';
 
+const SERIES_ID = 9237;
+
+type PredictionType = 'winner' | 'score' | 'wickets' | 'powerplay';
+
+type MatchListItem = {
+  match_number: number;
+  teams: string[];
+  venue: string;
+  start_time: string;
+};
+
+type PreMatchResponse = {
+  match?: { team1: string; team2: string; venue: string; date: string };
+  winner?: { probabilities: Record<string, number> };
+  total_score?: { low: number; high: number };
+  wickets?: { low: number; high: number };
+  powerplay?: { low: number; high: number };
+  message?: string;
+  error?: string;
+};
+
 const PreMatchPage: React.FC = () => {
-  const [result, setResult] = useState<string>('');
+  const [result, setResult] = useState<PreMatchResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
-  const date = new Date().toISOString().split('T')[0];
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [matchNumber, setMatchNumber] = useState(0);
+  const [activeType, setActiveType] = useState<PredictionType>('winner');
+  const [matches, setMatches] = useState<MatchListItem[]>([]);
+  const [message, setMessage] = useState('');
 
-  const handlePrediction = async (endpoint: string) => {
+  useEffect(() => {
+    const fetchMatches = async () => {
+      try {
+        const res = await api.get('/matches', { params: { date } });
+        const items = Array.isArray(res.data.matches) ? res.data.matches : [];
+        setMatches(items);
+        setMessage(items.length === 0 ? 'No matches found for this date.' : '');
+        if (items.length > 0 && matchNumber >= items.length) {
+          setMatchNumber(0);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setMessage(msg);
+        setMatches([]);
+      }
+    };
+
+    fetchMatches();
+  }, [date, matchNumber]);
+
+  const handlePrediction = async (type: PredictionType) => {
     setLoading(true);
-    setResult('🔄 Updating match context...');
+    setActiveType(type);
+    setMessage('');
     try {
-      const updateRes = await fetch(`http://localhost:8000/update-match-context?date=${date}&match_number=${matchNumber}`, {
-        method: 'POST',
+      const res = await api.get('/predict/pre-match', {
+        params: { series_id: SERIES_ID, date, match_number: matchNumber },
       });
-      if (!updateRes.ok) throw new Error(`Update context failed: ${updateRes.status}`);
-
-      const response = await fetch(`http://localhost:8000${endpoint}?date=${date}&match_number=${matchNumber}`);
-      if (!response.ok) throw new Error(`Prediction API failed: ${response.status}`);
-
-      const data = await response.json();
-      setResult(JSON.stringify(data, null, 2));
+      const data: PreMatchResponse = res.data;
+      if (data.error) {
+        setMessage(data.error);
+        setResult(null);
+      } else {
+        setResult(data);
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      setResult('❌ Error: ' + message);
+      setResult(null);
+      setMessage(message);
     } finally {
       setLoading(false);
     }
@@ -38,22 +85,22 @@ const PreMatchPage: React.FC = () => {
     {
       label: 'Predict Winner',
       icon: <SportsCricketIcon />,
-      action: () => handlePrediction('/predict/winner'),
+      action: () => handlePrediction('winner'),
     },
     {
       label: 'Powerplay',
       icon: <FlashOnIcon />,
-      action: () => handlePrediction('/predict/powerplay'),
+      action: () => handlePrediction('powerplay'),
     },
     {
       label: 'Total Score',
       icon: <CalendarTodayIcon />,
-      action: () => handlePrediction('/predict/score'),
+      action: () => handlePrediction('score'),
     },
     {
       label: 'Wickets',
       icon: <WbSunnyIcon />,
-      action: () => handlePrediction('/predict/wickets'),
+      action: () => handlePrediction('wickets'),
     },
   ];
 
@@ -73,7 +120,7 @@ const PreMatchPage: React.FC = () => {
         textAlign: 'center',
         paddingTop: '120px',
         paddingBottom: result ? '240px' : '160px',
-        px: 2, // Added for responsive fix
+        px: 2,
       }}
     >
       <Typography
@@ -83,14 +130,30 @@ const PreMatchPage: React.FC = () => {
           fontWeight: 'bold',
           mb: 2,
           mt: 8,
-          fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' }, // Added for responsive fix
+          fontSize: { xs: '1.8rem', sm: '2.5rem', md: '3rem' },
           textAlign: 'center',
         }}
       >
-        Pre-Match Decision Prep
+        Pre-Match Predictions
       </Typography>
 
-      <Box sx={{ mt: 3 }}>
+      <Box sx={{ mt: 3, display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
+        <Box>
+          <Typography variant="h6" sx={{ color: '#FFD700', mb: 1 }}>
+            Select Date
+          </Typography>
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '8px',
+              fontSize: '1rem',
+              fontFamily: 'Orbitron, sans-serif',
+            }}
+          />
+        </Box>
         <Typography variant="h6" sx={{ color: '#FFD700', mb: 1 }}>
           Select Match
         </Typography>
@@ -103,18 +166,23 @@ const PreMatchPage: React.FC = () => {
             fontSize: '1rem',
             fontFamily: 'Orbitron, sans-serif',
           }}
+          disabled={matches.length === 0}
         >
-          <option value={0}>Match 1</option>
-          <option value={1}>Match 2</option>
+          {matches.length === 0 && <option value={0}>No matches</option>}
+          {matches.map((match) => (
+            <option key={match.match_number} value={match.match_number}>
+              {match.teams.join(' vs ')}
+            </option>
+          ))}
         </select>
       </Box>
 
       <Box
         sx={{
           display: 'flex',
-          flexWrap: 'wrap', // Added for responsive fix
+          flexWrap: 'wrap',
           justifyContent: 'center',
-          gap: { xs: '1rem', sm: '2rem' }, // Added for responsive fix
+          gap: { xs: '1rem', sm: '2rem' },
           mt: 4,
         }}
       >
@@ -123,14 +191,15 @@ const PreMatchPage: React.FC = () => {
             key={btn.label}
             variant="contained"
             onClick={btn.action}
+            disabled={loading}
             startIcon={btn.icon}
             sx={{
               background: 'linear-gradient(90deg, #FF6F61 0%, #FF3CAC 100%)',
               borderRadius: '30px',
               px: 4,
               py: 2,
-              minWidth: { xs: '120px', sm: '150px' }, // Added for responsive fix
-              fontSize: { xs: '0.8rem', sm: '1rem' }, // Added for responsive fix
+              minWidth: { xs: '120px', sm: '150px' },
+              fontSize: { xs: '0.8rem', sm: '1rem' },
               fontWeight: 'bold',
               fontFamily: 'Orbitron, sans-serif',
               color: 'white',
@@ -145,7 +214,7 @@ const PreMatchPage: React.FC = () => {
         ))}
       </Box>
 
-      {result && (
+      {result && !result.error && (
         <Box
           sx={{
             mt: 6,
@@ -157,9 +226,9 @@ const PreMatchPage: React.FC = () => {
           <Paper
             elevation={6}
             sx={{
-              px: { xs: 2, sm: 4 }, // Added for responsive fix
-              py: { xs: 2, sm: 3 }, // Added for responsive fix
-              maxWidth: { xs: '90%', sm: '700px' }, // Added for responsive fix
+              px: { xs: 2, sm: 4 },
+              py: { xs: 2, sm: 3 },
+              maxWidth: { xs: '90%', sm: '700px' },
               background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
               border: '2px solid #FFD700',
               borderRadius: '20px',
@@ -182,7 +251,7 @@ const PreMatchPage: React.FC = () => {
                 textAlign: 'center',
               }}
             >
-              🎯 Decision Output
+              🎯 Prediction Output - {activeType}
             </Typography>
             <Box
               component="pre"
@@ -193,20 +262,55 @@ const PreMatchPage: React.FC = () => {
                 color: '#00E5FF',
               }}
             >
-              {result}
+              {result.message && (
+                <Typography>{result.message}</Typography>
+              )}
+              {activeType === 'winner' && !result.message && (
+                <>
+                  {result.winner?.probabilities
+                    ? `Winner: ${Object.entries(result.winner.probabilities).sort((a, b) => b[1] - a[1])[0][0]}`
+                    : 'Winner prediction pending.'}
+                </>
+              )}
+              {activeType === 'score' && (
+                <>
+                  {result.total_score
+                    ? `Total score range: ${result.total_score.low}-${result.total_score.high}`
+                    : 'Total score prediction pending.'}
+                </>
+              )}
+              {activeType === 'wickets' && (
+                <>
+                  {result.wickets
+                    ? `Total wickets range: ${result.wickets.low}-${result.wickets.high}`
+                    : 'Wickets prediction pending.'}
+                </>
+              )}
+              {activeType === 'powerplay' && (
+                <>
+                  {result.powerplay
+                    ? `Powerplay range: ${result.powerplay.low}-${result.powerplay.high}`
+                    : 'Powerplay prediction pending.'}
+                </>
+              )}
             </Box>
           </Paper>
         </Box>
       )}
 
-      {/* Disclaimer */}
+      {message && (
+        <Typography sx={{ color: '#FFD700', mt: 3 }}>
+          {message}
+        </Typography>
+      )}
+
       <Box
         sx={{
           position: 'fixed',
           bottom: 0,
           width: '100%',
           textAlign: 'center',
-          p: { xs: 1, sm: 2 }, // Added for responsive fix
+          p: { xs: 1, sm: 2 },
           backgroundColor: 'rgba(0,0,0,0.6)',
           zIndex: 10,
         }}

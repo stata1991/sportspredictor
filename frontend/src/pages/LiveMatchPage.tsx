@@ -1,51 +1,49 @@
-import React, { useMemo, useState } from 'react';
-import { Box, Typography, Button, Paper, Divider, ToggleButton, ToggleButtonGroup, CircularProgress } from '@mui/material';
-import { useAuth } from '../context/AuthContext';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Box, Typography, Button, Paper, Divider, CircularProgress } from '@mui/material';
+import SportsCricketIcon from '@mui/icons-material/SportsCricket';
+import FlashOnIcon from '@mui/icons-material/FlashOn';
+import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
+import WbSunnyIcon from '@mui/icons-material/WbSunny';
+import api from '../api';
 import homeBg from '../non-home.png';
 
-type RiskMode = 'conservative' | 'balanced' | 'aggressive';
+type MatchListItem = {
+  match_number: number;
+  teams: string[];
+  venue: string;
+  start_time: string;
+};
 
-type WinnerLiveResponse = {
-  current_score?: number;
-  overs?: number;
-  wickets?: number;
-  win_probability?: Record<string, number>;
-  message?: string;
+type LiveResponse = {
+  match?: { team1: string; team2: string; venue: string; date: string };
+  winner?: { team?: string; probability?: number | null; probabilities?: Record<string, number> | null };
+  live?: { batting_team?: string; runs?: number; wickets?: number; overs?: number; current_run_rate?: number };
+  projected_total?: number | null;
+  chase?: {
+    will_reach?: boolean;
+    finish_at?: string | null;
+    short_by?: number | null;
+    target?: number | null;
+    required_run_rate?: number | null;
+  } | null;
+  wickets?: { low: number; high: number } | null;
+  powerplay?: { low: number; high: number } | null;
   error?: string;
+  message?: string;
 };
 
-type LiveStateResponse = {
-  batting_team?: string;
-  runs?: number;
-  wickets?: number;
-  overs?: number;
-};
+type PredictionType = 'winner' | 'score' | 'wickets' | 'powerplay' | null;
 
-type DecisionResponse = {
-  recommendation: {
-    direction: 'Hold' | 'Lean' | 'Strong' | 'Flip';
-    action: string;
-    moment: string;
-  };
-  micro_why: string;
-  next_window_in: string;
-  silent: boolean;
-  silent_reason: string | null;
-  internal_state: {
-    direction_score: number;
-  };
-};
+const SERIES_ID = 9237;
 
 const LiveMatchPage: React.FC = () => {
-  const { currentUser, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [riskMode, setRiskMode] = useState<RiskMode>('balanced');
-  const [showWhy, setShowWhy] = useState(false);
   const [matchNumber, setMatchNumber] = useState(0);
-  const [decision, setDecision] = useState<DecisionResponse | null>(null);
+  const [dateStr, setDateStr] = useState(new Date().toISOString().split('T')[0]);
+  const [matches, setMatches] = useState<MatchListItem[]>([]);
   const [message, setMessage] = useState('');
-
-  const date = new Date().toISOString().split('T')[0];
+  const [result, setResult] = useState<LiveResponse | null>(null);
+  const [activeType, setActiveType] = useState<PredictionType>(null);
 
   const palette = useMemo(
     () => ({
@@ -55,87 +53,65 @@ const LiveMatchPage: React.FC = () => {
       primary: '#e2e8f0',
       muted: '#94a3b8',
       accent: '#22d3ee',
-      hold: '#94a3b8',
-      lean: '#38bdf8',
-      strong: '#34d399',
-      flip: '#f59e0b',
-      silent: '#64748b',
+      highlight: '#f59e0b',
     }),
     []
   );
 
-  const directionColor = (d: string) => {
-    if (d === 'Strong') return palette.strong;
-    if (d === 'Lean') return palette.lean;
-    if (d === 'Flip') return palette.flip;
-    return palette.hold;
-  };
+  useEffect(() => {
+    const fetchMatches = async () => {
+      try {
+        const res = await api.get('/matches', { params: { date: dateStr } });
+        const items = Array.isArray(res.data.matches) ? res.data.matches : [];
+        setMatches(items);
+        setMessage(items.length === 0 ? 'No matches found for this date.' : '');
+        if (items.length > 0 && matchNumber >= items.length) {
+          setMatchNumber(0);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setMessage(msg);
+        setMatches([]);
+      }
+    };
 
-  const getDecision = async () => {
+    fetchMatches();
+  }, [dateStr, matchNumber]);
+
+  const getPredictions = async (type: PredictionType) => {
+    if (!type) return;
     setLoading(true);
+    setActiveType(type);
     setMessage('');
     try {
-      const updateRes = await fetch(`http://127.0.0.1:8000/update-match-context?date=${date}&match_number=${matchNumber}`, {
-        method: 'POST',
+      const res = await api.get('/predict/live', {
+        params: { series_id: SERIES_ID, date: dateStr, match_number: matchNumber },
       });
-      if (!updateRes.ok) throw new Error('Unable to update live match context');
-
-      const liveRes = await fetch(`http://127.0.0.1:8000/live-match-state?date=${date}`);
-      if (!liveRes.ok) throw new Error('Unable to fetch live state');
-      const liveState: LiveStateResponse = await liveRes.json();
-
-      const winnerRes = await fetch(`http://127.0.0.1:8000/predict/winner-live?date=${date}`);
-      if (!winnerRes.ok) throw new Error('Unable to derive control edge');
-      const winner: WinnerLiveResponse = await winnerRes.json();
-
-      if (winner.message) {
-        setMessage(winner.message);
-        setDecision(null);
-        return;
+      const data: LiveResponse = res.data;
+      if (data.error) {
+        setMessage(data.error);
+        setResult(null);
+      } else {
+        setResult(data);
+        if (data.message) {
+          setMessage(data.message);
+        }
       }
-      if (winner.error) {
-        setMessage(winner.error);
-        setDecision(null);
-        return;
-      }
-
-      const battingTeam = liveState.batting_team || '';
-      const winProb = winner.win_probability || {};
-      const battingWin = battingTeam && winProb[battingTeam] !== undefined ? winProb[battingTeam] : 50;
-      const winEdge = (battingWin - 50) / 50;
-
-      const overs = typeof liveState.overs === 'number' ? liveState.overs : typeof winner.overs === 'number' ? winner.overs : 0;
-      const runs = typeof liveState.runs === 'number' ? liveState.runs : typeof winner.current_score === 'number' ? winner.current_score : 0;
-      const wickets =
-        typeof liveState.wickets === 'number' ? liveState.wickets : typeof winner.wickets === 'number' ? winner.wickets : 0;
-      const currentRunRate = overs > 0 ? runs / overs : 0;
-
-      const assistRes = await fetch('http://127.0.0.1:8000/assist/decision', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          match_key: `${date}-${matchNumber}`,
-          runs,
-          wickets,
-          overs,
-          current_run_rate: currentRunRate,
-          win_edge: winEdge,
-          risk_mode: riskMode,
-        }),
-      });
-      if (!assistRes.ok) throw new Error('Unable to fetch decision');
-      const decisionData: DecisionResponse = await assistRes.json();
-      setDecision(decisionData);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setMessage(msg);
-      setDecision(null);
+      setResult(null);
     } finally {
       setLoading(false);
     }
   };
 
-  if (authLoading) return <Typography color="white">Loading...</Typography>;
+  const predictionButtons = [
+    { label: 'Predict Winner', icon: <SportsCricketIcon />, value: 'winner' as PredictionType },
+    { label: 'Total Score', icon: <CalendarTodayIcon />, value: 'score' as PredictionType },
+    { label: 'Wickets', icon: <WbSunnyIcon />, value: 'wickets' as PredictionType },
+    { label: 'Powerplay', icon: <FlashOnIcon />, value: 'powerplay' as PredictionType },
+  ];
 
   return (
     <Box
@@ -155,136 +131,157 @@ const LiveMatchPage: React.FC = () => {
       }}
     >
       <Typography variant="h4" sx={{ fontWeight: 700, mb: 1, textAlign: 'center' }}>
-        Live Decision Assistant
+        Live Match Predictions
       </Typography>
       <Typography sx={{ color: palette.muted, mb: 4, textAlign: 'center' }}>
-        One action per leverage moment. Silence when no edge.
+        Live IPL outputs for winner, total score, wickets, and powerplay.
       </Typography>
 
-      {!currentUser ? (
-        <Typography variant="h6">Please sign in to access live match decisions.</Typography>
-      ) : (
-        <Paper
-          elevation={0}
-          sx={{
-            width: '100%',
-            maxWidth: 760,
-            p: { xs: 2, sm: 3 },
-            borderRadius: 3,
-            backgroundColor: palette.card,
-            border: `1px solid ${palette.border}`,
-          }}
-        >
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-between', alignItems: 'center' }}>
-            <Box>
-              <Typography sx={{ color: palette.muted, mb: 0.5 }}>Match</Typography>
-              <select
-                value={matchNumber}
-                onChange={(e) => setMatchNumber(Number(e.target.value))}
-                style={{
-                  background: '#0f172a',
-                  color: '#e2e8f0',
-                  border: `1px solid ${palette.border}`,
-                  borderRadius: 8,
-                  padding: '8px 10px',
-                }}
-              >
-                <option value={0}>Match 1</option>
-                <option value={1}>Match 2</option>
-              </select>
-            </Box>
-
-            <Box>
-              <Typography sx={{ color: palette.muted, mb: 0.5 }}>Risk Mode</Typography>
-              <ToggleButtonGroup
-                value={riskMode}
-                exclusive
-                onChange={(_, v) => v && setRiskMode(v)}
-                size="small"
-                sx={{ background: '#0f172a', borderRadius: 2 }}
-              >
-                <ToggleButton value="conservative" sx={{ color: palette.primary }}>
-                  Conservative
-                </ToggleButton>
-                <ToggleButton value="balanced" sx={{ color: palette.primary }}>
-                  Balanced
-                </ToggleButton>
-                <ToggleButton value="aggressive" sx={{ color: palette.primary }}>
-                  Aggressive
-                </ToggleButton>
-              </ToggleButtonGroup>
-            </Box>
+      <Paper
+        elevation={0}
+        sx={{
+          width: '100%',
+          maxWidth: 860,
+          p: { xs: 2, sm: 3 },
+          borderRadius: 3,
+          backgroundColor: palette.card,
+          border: `1px solid ${palette.border}`,
+        }}
+      >
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, justifyContent: 'space-between', alignItems: 'center' }}>
+          <Box>
+            <Typography sx={{ color: palette.muted, mb: 0.5 }}>Date</Typography>
+            <input
+              type="date"
+              value={dateStr}
+              onChange={(e) => setDateStr(e.target.value)}
+              style={{
+                background: '#0f172a',
+                color: '#e2e8f0',
+                border: `1px solid ${palette.border}`,
+                borderRadius: 8,
+                padding: '8px 10px',
+              }}
+            />
           </Box>
+          <Box>
+            <Typography sx={{ color: palette.muted, mb: 0.5 }}>Match</Typography>
+            <select
+              value={matchNumber}
+              onChange={(e) => setMatchNumber(Number(e.target.value))}
+              style={{
+                background: '#0f172a',
+                color: '#e2e8f0',
+                border: `1px solid ${palette.border}`,
+                borderRadius: 8,
+                padding: '8px 10px',
+              }}
+              disabled={matches.length === 0}
+            >
+              {matches.length === 0 && <option value={0}>No matches</option>}
+              {matches.map((match) => (
+                <option key={match.match_number} value={match.match_number}>
+                  {match.teams.join(' vs ')}
+                </option>
+              ))}
+            </select>
+          </Box>
+        </Box>
 
-          <Button
-            onClick={getDecision}
-            disabled={loading}
-            variant="contained"
-            sx={{
-              mt: 3,
-              mb: 3,
-              borderRadius: 8,
-              px: 3,
-              py: 1.2,
-              backgroundColor: '#0ea5e9',
-              fontWeight: 700,
-              textTransform: 'none',
-            }}
-          >
-            {loading ? <CircularProgress size={18} sx={{ color: '#fff' }} /> : 'Get Live Decision'}
-          </Button>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mt: 3 }}>
+          {predictionButtons.map((btn) => (
+            <Button
+              key={btn.label}
+              variant="outlined"
+              onClick={() => getPredictions(btn.value)}
+              startIcon={btn.icon}
+              sx={{
+                borderColor: palette.border,
+                color: palette.primary,
+                textTransform: 'none',
+                fontWeight: 600,
+              }}
+            >
+              {btn.label}
+            </Button>
+          ))}
+        </Box>
 
-          {message && (
-            <Typography sx={{ color: palette.muted, mb: 2 }}>
-              {message}
-            </Typography>
-          )}
+        {loading && (
+          <Box sx={{ mt: 2 }}>
+            <CircularProgress size={18} sx={{ color: palette.primary }} />
+          </Box>
+        )}
 
-          {decision && (
-            <Box>
-              <Divider sx={{ borderColor: palette.border, mb: 2 }} />
-              <Typography sx={{ color: palette.muted, fontSize: 13 }}>Recommendation</Typography>
-              <Typography
-                variant="h3"
-                sx={{
-                  mt: 0.5,
-                  fontWeight: 800,
-                  color: decision.silent ? palette.silent : directionColor(decision.recommendation.direction),
-                }}
-              >
-                {decision.silent ? 'Hold' : decision.recommendation.direction}
-              </Typography>
+        {result && !result.error && (
+          <Box sx={{ display: 'grid', gap: 2, mt: 3 }}>
+            <Divider sx={{ borderColor: palette.border }} />
 
-              <Typography sx={{ mt: 1, color: palette.primary }}>
-                {decision.silent ? 'No action. System is intentionally silent.' : decision.recommendation.action}
-              </Typography>
-              <Typography sx={{ mt: 0.5, color: palette.muted }}>
-                Moment: {decision.recommendation.moment.replace(/_/g, ' ')}
-              </Typography>
-              <Typography sx={{ mt: 0.5, color: palette.accent }}>
-                Next leverage window: {decision.next_window_in}
-              </Typography>
-
-              {decision.silent && decision.silent_reason && (
-                <Typography sx={{ mt: 1, color: palette.muted }}>{decision.silent_reason}</Typography>
-              )}
-
-              <Button
-                variant="text"
-                onClick={() => setShowWhy((v) => !v)}
-                sx={{ mt: 1, px: 0, textTransform: 'none', color: palette.primary }}
-              >
-                {showWhy ? 'Hide why' : 'Show why'}
-              </Button>
-              {showWhy && (
-                <Typography sx={{ color: palette.muted }}>
-                  {decision.micro_why}
+            {activeType === 'winner' && (
+              <Paper sx={{ p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>
+                <Typography sx={{ color: palette.muted, fontSize: 12 }}>Who will win</Typography>
+                <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
+                  {result.winner?.team || 'Prediction pending'}
                 </Typography>
-              )}
-            </Box>
-          )}
-        </Paper>
-      )}
+                {result.winner?.probabilities && (
+                  <Typography sx={{ color: palette.muted }}>
+                    {Object.entries(result.winner.probabilities)
+                      .map(([team, pct]) => `${team}: ${pct}`)
+                      .join(' • ')}
+                  </Typography>
+                )}
+              </Paper>
+            )}
+
+            {activeType === 'score' && (
+              <Paper sx={{ p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>
+                <Typography sx={{ color: palette.muted, fontSize: 12 }}>Total score</Typography>
+                <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
+                  {result.projected_total !== null && result.projected_total !== undefined
+                    ? result.projected_total
+                    : 'Prediction pending'}
+                </Typography>
+                {result.chase && (
+                  <Typography sx={{ color: palette.muted }}>
+                    Target: {result.chase.target ?? 'n/a'} · Required RR: {result.chase.required_run_rate ?? 'n/a'}
+                  </Typography>
+                )}
+                {result.chase && (
+                  <Typography sx={{ color: palette.highlight, mt: 1 }}>
+                    {result.chase.will_reach
+                      ? `Likely to finish by ${result.chase.finish_at} overs`
+                      : `Likely short by ${result.chase.short_by} runs`}
+                  </Typography>
+                )}
+              </Paper>
+            )}
+
+            {activeType === 'wickets' && (
+              <Paper sx={{ p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>
+                <Typography sx={{ color: palette.muted, fontSize: 12 }}>Wickets</Typography>
+                <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
+                  {result.wickets ? `${result.wickets.low}-${result.wickets.high}` : 'Prediction pending'}
+                </Typography>
+              </Paper>
+            )}
+
+            {activeType === 'powerplay' && (
+              <Paper sx={{ p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>
+                <Typography sx={{ color: palette.muted, fontSize: 12 }}>Powerplay score</Typography>
+                <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
+                  {result.powerplay ? `${result.powerplay.low}-${result.powerplay.high}` : 'Prediction pending'}
+                </Typography>
+              </Paper>
+            )}
+          </Box>
+        )}
+
+        {message && (
+          <Typography sx={{ color: palette.muted, mt: 2 }}>
+            {message}
+          </Typography>
+        )}
+      </Paper>
 
       <Box
         sx={{

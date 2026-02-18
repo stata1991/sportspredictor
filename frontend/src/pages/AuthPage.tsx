@@ -15,7 +15,7 @@ import {
   signInWithPopup,
   GoogleAuthProvider
 } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, firebaseEnabled } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 
 const AuthPage: React.FC = () => {
@@ -27,6 +27,10 @@ const AuthPage: React.FC = () => {
 
   const handleEmailAuth = async () => {
     setError('');
+    if (!firebaseEnabled || !auth) {
+      setError('Auth is disabled for local development.');
+      return;
+    }
     try {
       if (isSignUp) {
         await createUserWithEmailAndPassword(auth, email, password);
@@ -41,6 +45,10 @@ const AuthPage: React.FC = () => {
 
   const handleGoogleSignIn = async () => {
     setError('');
+    if (!firebaseEnabled || !auth) {
+      setError('Auth is disabled for local development.');
+      return;
+    }
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
@@ -49,6 +57,36 @@ const AuthPage: React.FC = () => {
       setError(err.message);
     }
   };
+
+  if (!firebaseEnabled) {
+    return (
+      <Container maxWidth="sm" sx={{ mt: 8, px: { xs: 1, sm: 2 } }}>
+        <Paper
+          elevation={10}
+          sx={{
+            p: { xs: 2, sm: 4 },
+            borderRadius: 4,
+            background: 'linear-gradient(145deg, #0f2027, #203a43, #2c5364)',
+            color: 'white',
+            boxShadow: '0 0 20px #FFD70088',
+            fontFamily: 'Orbitron, sans-serif',
+            textAlign: 'center',
+          }}
+        >
+          <Typography
+            variant="h5"
+            gutterBottom
+            sx={{ fontWeight: 'bold', color: '#FFD700', fontFamily: 'Orbitron, sans-serif' }}
+          >
+            Auth Disabled
+          </Typography>
+          <Typography>
+            Firebase config is not set. Sign-in is disabled for local development.
+          </Typography>
+        </Paper>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="sm" sx={{ mt: 8, px: { xs: 1, sm: 2 } }}> {/* Added responsive padding */}
