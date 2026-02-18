@@ -6,7 +6,11 @@ from datetime import datetime
 from dotenv import load_dotenv
 import logging
 from backend.cache import cache
-from backend.config import SERIES_TTL, MATCH_INFO_TTL, OVERS_TTL, SCORECARD_TTL
+from backend.config import (
+    SERIES_TTL, SERIES_SCHEDULE_TTL, MATCH_INFO_TTL, COMPLETED_MATCH_TTL,
+    OVERS_TTL, SCORECARD_TTL,
+    MATCH_LIST_TODAY_TTL, MATCH_LIST_PAST_TTL, MATCH_LIST_FUTURE_TTL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +132,7 @@ T20WC_SERIES_ID = int(os.getenv('T20WC_SERIES_ID', '0') or 0)
 def fetch_series_matches_for_id(series_id: int):
     url = f"{BASE_URL}/series/{series_id}"
     cache_key = f"cb:series:{series_id}:info:v1"
-    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_SCHEDULE_TTL, stale_ttl=3600)
 
     matches = []
     for day in data.get("matchDetails", []):
@@ -159,10 +163,29 @@ def get_match_by_date_for_series(date_str: str, series_id: int):
     return None
 
 
+def _match_list_ttl(date_str: str) -> int:
+    """Return TTL based on date volatility: past→24h, today→1h, future→30m."""
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    if date_str < today:
+        return MATCH_LIST_PAST_TTL
+    if date_str == today:
+        return MATCH_LIST_TODAY_TTL
+    return MATCH_LIST_FUTURE_TTL
+
+
 def fetch_live_data_for_series(date_str: str, series_id: int, teams_filter=None):
+    # Check match-list cache first (keyed by series+date)
+    ml_cache_key = f"cb:matches:{series_id}:{date_str}:v1"
+    if not teams_filter:
+        cached_ml = cache.get(ml_cache_key)
+        if cached_ml is not None:
+            _inc_stat('cache_hits')
+            logger.info("Match list cache hit for %s %s (%d matches)", series_id, date_str, len(cached_ml))
+            return cached_ml
+
     url = f"{BASE_URL}/series/{series_id}"
     cache_key = f"cb:series:{series_id}:info:v1"
-    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_SCHEDULE_TTL, stale_ttl=3600)
 
     formatted_date = datetime.strptime(date_str, "%Y-%m-%d").strftime('%a, %d %b %Y')
     logger.info("Formatted date for match key: %s", formatted_date)
@@ -185,6 +208,13 @@ def fetch_live_data_for_series(date_str: str, series_id: int, teams_filter=None)
                 matches_today.append(match_info)
 
     logger.info("Found %d T20 matches for %s", len(matches_today), date_str)
+
+    # Cache filtered result (skip when teams_filter is used — custom filter)
+    if not teams_filter:
+        ttl = _match_list_ttl(date_str)
+        cache.set(ml_cache_key, matches_today, ttl)
+        logger.info("Cached match list for %s %s ttl=%ds", series_id, date_str, ttl)
+
     return matches_today
 
 
@@ -245,7 +275,7 @@ def get_first_innings_score_for_series(date: str, series_id: int) -> int:
 def fetch_series_matches():
     url = f"{BASE_URL}/series/{SERIES_ID}"
     cache_key = f"cb:series:{SERIES_ID}:info:v1"
-    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_SCHEDULE_TTL, stale_ttl=3600)
 
     matches = []
     for day in data.get("matchDetails", []):
@@ -259,7 +289,7 @@ def get_todays_match():
     today_str = datetime.utcnow().strftime('%a, %d %b %Y')
     url = f"{BASE_URL}/series/{SERIES_ID}"
     cache_key = f"cb:series:{SERIES_ID}:info:v1"
-    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_SCHEDULE_TTL, stale_ttl=3600)
 
     match_maps = data.get("matchDetailsMap", data.get("matchDetails", []))
 
@@ -426,11 +456,25 @@ def get_match_details(match_id):
         "powerplay": powerplay
     }
 
+
+def get_completed_match_details(match_id):
+    """Fetch match details with 24h TTL — use only for matches known to be completed."""
+    completed_key = f"cb:match:{match_id}:completed:v1"
+    cached = cache.get(completed_key)
+    if cached is not None:
+        _inc_stat('cache_hits')
+        return cached
+    details = get_match_details(match_id)
+    if details:
+        cache.set(completed_key, details, COMPLETED_MATCH_TTL)
+    return details
+
+
 # Fetch live match data for given date (simplified for Cricbuzz API)
 def fetch_live_data(date_str: str):
     url = f"{BASE_URL}/series/{SERIES_ID}"
     cache_key = f"cb:series:{SERIES_ID}:info:v1"
-    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_TTL, stale_ttl=1800)
+    data = _stale_cached_get_json(url, _headers_with_endpoint(SERIES_ENDPOINT), cache_key, SERIES_SCHEDULE_TTL, stale_ttl=3600)
 
     formatted_date = datetime.strptime(date_str, "%Y-%m-%d").strftime('%a, %d %b %Y')
     logger.info("Formatted date for match key: %s", formatted_date)

@@ -5,7 +5,7 @@ from datetime import datetime
 import math
 import logging
 
-from backend.feature_store import build_series_features, SeriesFeatures, _band_for_target
+from backend.feature_store import build_series_features, SeriesFeatures, _band_for_target, record_series_completion
 from backend.live_data_provider import fetch_live_data_for_series, get_match_details, UpstreamError, reset_request_stats, get_request_stats
 from backend.decision_engine import get_decision_moment
 
@@ -225,6 +225,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
     match_id = match.get("matchId")
 
     if any(token in status for token in ["won by", "match tied", "no result", "abandoned", "complete"]):
+        record_series_completion(series_id)
         return {
             "prediction_stage": "completed",
             "match": {"team1": team1, "team2": team2, "venue": venue, "date": date},

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time as _time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from statistics import mean, pstdev
 from typing import Dict, List, Optional
@@ -8,11 +10,28 @@ import logging
 
 from backend.cache import cache
 from backend.config import FEATURE_TTL
-from backend.live_data_provider import fetch_series_matches_for_id, get_match_details
+from backend.live_data_provider import fetch_series_matches_for_id, get_match_details, get_completed_match_details
 
 logger = logging.getLogger(__name__)
 
-MAX_FEATURE_MATCHES = 10
+MAX_FEATURE_MATCHES = 8
+COMPLETION_STALENESS_WINDOW = 300  # 5 minutes
+
+
+def record_series_completion(series_id: int) -> None:
+    """Mark that a match just completed in this series, triggering features refresh."""
+    key = f"ft:series:{series_id}:last_completion"
+    cache.set(key, _time.time(), 600)  # survive 10 min
+    logger.info("Recorded series completion for series %s", series_id)
+
+
+def _features_stale_from_completion(series_id: int) -> bool:
+    """Return True if a match completed in the last 5 minutes → features need rebuild."""
+    key = f"ft:series:{series_id}:last_completion"
+    completion_time = cache.get(key)
+    if completion_time and (_time.time() - completion_time) < COMPLETION_STALENESS_WINDOW:
+        return True
+    return False
 
 
 @dataclass
@@ -92,7 +111,11 @@ def build_series_features(series_id: int) -> SeriesFeatures:
     cache_key = f"ft:series:{series_id}:features:v1"
     cached = cache.get(cache_key)
     if cached:
-        return cached
+        if _features_stale_from_completion(series_id):
+            cache.delete(cache_key)
+            logger.info("Features cache invalidated for series %s (recent match completion)", series_id)
+        else:
+            return cached
 
     matches = fetch_series_matches_for_id(series_id)
     team_form: Dict[str, TeamForm] = {}
@@ -113,6 +136,22 @@ def build_series_features(series_id: int) -> SeriesFeatures:
     completed = completed[:MAX_FEATURE_MATCHES]
     logger.info("build_series_features: using %d of %d completed matches (skipped %d oldest)",
                 len(completed), len(completed) + skipped, skipped)
+
+    # Pre-fetch match details in parallel
+    match_ids = [
+        m.get("matchInfo", {}).get("matchId")
+        for m in completed
+        if m.get("matchInfo", {}).get("matchId")
+    ]
+    details_map: Dict[int, dict] = {}
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        future_to_id = {executor.submit(get_completed_match_details, mid): mid for mid in match_ids}
+        for future in as_completed(future_to_id):
+            mid = future_to_id[future]
+            try:
+                details_map[mid] = future.result()
+            except Exception:
+                logger.warning("Failed to fetch details for match %s", mid)
 
     for match in completed:
         info = match.get("matchInfo", {})
@@ -150,10 +189,10 @@ def build_series_features(series_id: int) -> SeriesFeatures:
         chased = 1 if int(team2_runs) >= target + 1 else 0
         chase_bands[_band_for_target(target)].append(chased)
 
-        # Powerplay ratio via match details (cached)
+        # Powerplay ratio via pre-fetched match details
         match_id = info.get("matchId")
         if match_id:
-            details = get_match_details(match_id)
+            details = details_map.get(match_id)
             if details and details.get("powerplay"):
                 pp = details.get("powerplay")
                 for team, pp_stats in pp.items():

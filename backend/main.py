@@ -1,7 +1,10 @@
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from datetime import datetime
+import hashlib
+import json
 import os
 import uuid
 import logging
@@ -14,6 +17,8 @@ from backend.live_data_provider import (
     T20WC_SERIES_ID,
     UpstreamError,
 )
+from backend.cache import cache
+from backend.config import PRED_PRE_TOSS_TTL, PRED_POST_TOSS_TTL, PRED_COMPLETED_TTL, PRED_IN_PROGRESS_TTL
 
 correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("correlation_id", default="-")
 
@@ -47,7 +52,25 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["ETag"],
 )
+
+
+def _etag_response(request: Request, data: dict):
+    """Return JSONResponse with ETag, or 304 if client already has current version."""
+    body = json.dumps(data, sort_keys=True)
+    etag = hashlib.md5(body.encode()).hexdigest()
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304)
+    return JSONResponse(content=data, headers={"ETag": etag})
+
+
+_PRED_STAGE_TTL = {
+    "pre_toss": PRED_PRE_TOSS_TTL,
+    "post_toss": PRED_POST_TOSS_TTL,
+    "completed": PRED_COMPLETED_TTL,
+    "in_progress": PRED_IN_PROGRESS_TTL,
+}
 
 
 def _safe_pre_match(series_id: int, date: str, match_number: int = 0):
@@ -57,12 +80,24 @@ def _safe_pre_match(series_id: int, date: str, match_number: int = 0):
         datetime.strptime(date, "%Y-%m-%d")
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD") from exc
+
+    pred_cache_key = f"pred:pre:{series_id}:{date}:{match_number}:v1"
+    cached = cache.get(pred_cache_key)
+    if cached is not None:
+        cached["_cached"] = True
+        return cached
+
     try:
-        return pre_match_predictions(series_id=series_id, date=date, match_number=match_number)
+        result = pre_match_predictions(series_id=series_id, date=date, match_number=match_number)
     except MatchNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except UpstreamError as exc:
         raise HTTPException(status_code=503, detail="Upstream Cricbuzz API unavailable") from exc
+
+    stage = result.get("prediction_stage", "pre_toss")
+    ttl = _PRED_STAGE_TTL.get(stage, PRED_PRE_TOSS_TTL)
+    cache.set(pred_cache_key, result, ttl)
+    return result
 
 
 def _safe_live(series_id: int, date: str, match_number: int = 0):
@@ -146,12 +181,12 @@ def update_t20wc_match_context(date: str = datetime.utcnow().strftime("%Y-%m-%d"
 
 
 @app.get("/matches")
-def list_matches(date: str):
+def list_matches(request: Request, date: str):
     try:
         matches = fetch_live_data_for_series(date, IPL_SERIES_ID)
     except UpstreamError as exc:
         raise HTTPException(status_code=503, detail="Upstream Cricbuzz API unavailable") from exc
-    return {
+    data = {
         "matches": [
             {
                 "match_number": i,
@@ -163,17 +198,18 @@ def list_matches(date: str):
             for i, match in enumerate(matches)
         ]
     }
+    return _etag_response(request, data)
 
 
 @app.get("/t20wc/matches")
-def list_t20wc_matches(date: str):
+def list_t20wc_matches(request: Request, date: str):
     if not T20WC_SERIES_ID:
         raise HTTPException(status_code=500, detail="T20WC_SERIES_ID is not configured.")
     try:
         matches = fetch_live_data_for_series(date, T20WC_SERIES_ID)
     except UpstreamError as exc:
         raise HTTPException(status_code=503, detail="Upstream Cricbuzz API unavailable") from exc
-    return {
+    data = {
         "matches": [
             {
                 "match_number": i,
@@ -185,6 +221,7 @@ def list_t20wc_matches(date: str):
             for i, match in enumerate(matches)
         ]
     }
+    return _etag_response(request, data)
 
 
 @app.get("/predict/pre-match")
