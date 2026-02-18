@@ -50,10 +50,10 @@ def parse_winner_from_status(status: str) -> Optional[str]:
     return status[:idx].strip() or None
 
 
-def _range_from_stats(avg: float, std: float, cap: Optional[int] = None) -> Dict[str, int]:
-    low = max(0, int(round(avg - std)))
+def _range_from_stats(avg: float, std: float, cap: Optional[int] = None, tightness: float = 0.6) -> Dict[str, int]:
+    low = max(0, int(round(avg - tightness * std)))
     mid = max(0, int(round(avg)))
-    high = max(low, int(round(avg + std)))
+    high = max(low, int(round(avg + tightness * std)))
     if cap is not None:
         low = min(low, cap)
         mid = min(mid, cap)
@@ -96,17 +96,18 @@ def _powerplay_model(
     team_pp_rpo = pp_ratio * avg_runs / 6.0
     pp_std = max(std_runs, 12.0) * pp_ratio
 
+    tightness = 0.6
     if is_live and overs < 6.0 and overs > 0:
         remaining_pp = max(0.0, 6.0 - overs)
         pp_mid = int(round(runs + team_pp_rpo * remaining_pp))
         shrink = remaining_pp / 6.0
-        pp_low = max(runs, int(round(pp_mid - pp_std * shrink)))
-        pp_high = int(round(pp_mid + pp_std * shrink))
+        pp_low = max(runs, int(round(pp_mid - pp_std * tightness * shrink)))
+        pp_high = int(round(pp_mid + pp_std * tightness * shrink))
         source = "live_projection"
     else:
         pp_mid = int(round(avg_runs * pp_ratio))
-        pp_low = max(0, int(round(pp_mid - pp_std)))
-        pp_high = int(round(pp_mid + pp_std))
+        pp_low = max(0, int(round(pp_mid - pp_std * tightness)))
+        pp_high = int(round(pp_mid + pp_std * tightness))
         source = "prior"
 
     pp_range = {"low": min(pp_low, pp_high), "mid": pp_mid, "high": max(pp_low, pp_high)}

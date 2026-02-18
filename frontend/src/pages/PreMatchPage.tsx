@@ -268,28 +268,31 @@ const PreMatchPage: React.FC = () => {
               {activeType === 'winner' && !result.message && (
                 <>
                   {result.winner?.probabilities
-                    ? `Winner: ${Object.entries(result.winner.probabilities).sort((a, b) => b[1] - a[1])[0][0]}`
+                    ? Object.entries(result.winner.probabilities)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([team, p]) => `${team} ${Math.round(p * 100)}%`)
+                        .join(' \u00B7 ')
                     : 'Winner prediction pending.'}
                 </>
               )}
               {activeType === 'score' && (
                 <>
                   {result.total_score
-                    ? `Total score range: ${result.total_score.low}-${result.total_score.high}`
+                    ? `Expected: ${result.total_score.low} – ${result.total_score.high} runs`
                     : 'Total score prediction pending.'}
                 </>
               )}
               {activeType === 'wickets' && (
                 <>
                   {result.wickets
-                    ? `Total wickets range: ${result.wickets.low}-${result.wickets.high}`
+                    ? `Expected: ${result.wickets.low} – ${result.wickets.high} wickets`
                     : 'Wickets prediction pending.'}
                 </>
               )}
               {activeType === 'powerplay' && (
                 <>
                   {result.powerplay
-                    ? `Powerplay range: ${result.powerplay.low}-${result.powerplay.high}`
+                    ? `Expected: ${result.powerplay.low} – ${result.powerplay.high} runs`
                     : 'Powerplay prediction pending.'}
                 </>
               )}

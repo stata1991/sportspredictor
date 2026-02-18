@@ -7,16 +7,23 @@ type Props = {
 };
 
 const ConfidenceBadge: React.FC<Props> = ({ confidence, components }) => {
-  const pct = Math.round(confidence * 100);
-  const color = confidence >= 0.7 ? '#22c55e' : confidence >= 0.5 ? '#f59e0b' : '#94a3b8';
+  const label =
+    confidence >= 0.7 ? 'High confidence' :
+    confidence >= 0.55 ? 'Moderate confidence' :
+    'Early estimate';
+  const color =
+    confidence >= 0.7 ? '#22c55e' :
+    confidence >= 0.55 ? '#f59e0b' :
+    '#94a3b8';
 
   const tooltipContent = components ? (
     <Box sx={{ fontSize: 11 }}>
+      <div style={{ fontWeight: 700, marginBottom: 2 }}>{Math.round(confidence * 100)}% confidence</div>
       {Object.entries(components).map(([key, val]) => (
         <div key={key}>{key}: {typeof val === 'number' ? val.toFixed(2) : String(val)}</div>
       ))}
     </Box>
-  ) : '';
+  ) : `${Math.round(confidence * 100)}%`;
 
   return (
     <Tooltip title={tooltipContent} arrow placement="right">
@@ -32,10 +39,10 @@ const ConfidenceBadge: React.FC<Props> = ({ confidence, components }) => {
           color,
           fontSize: 11,
           fontWeight: 700,
-          cursor: components ? 'help' : 'default',
+          cursor: 'help',
         }}
       >
-        {pct}%
+        {label}
       </Box>
     </Tooltip>
   );

@@ -420,26 +420,28 @@ const T20WorldCupPage: React.FC = () => {
                   {preMatchResult.message && (
                     <Typography>{preMatchResult.message}</Typography>
                   )}
-                  {preMatchType === 'winner' && !preMatchResult.message && (
-                    <Typography>
-                      Winner: {preMatchResult.winner?.team} ({preMatchResult.winner?.probability})
-                    </Typography>
-                  )}
+                  {preMatchType === 'winner' && !preMatchResult.message && preMatchResult.winner?.probabilities && (() => {
+                    const probs = preMatchResult.winner.probabilities;
+                    const sorted = Object.entries(probs).sort((a, b) => b[1] - a[1]);
+                    return (
+                      <Typography sx={{ fontWeight: 700, fontSize: 18 }}>
+                        {sorted.map(([team, p]) => `${team} ${Math.round(p * 100)}%`).join(' \u00B7 ')}
+                      </Typography>
+                    );
+                  })()}
                   {preMatchType === 'score' && preMatchResult.total_score && (
                     <Typography>
-                      Total score range: {preMatchResult.total_score.low}-{preMatchResult.total_score.mid}-
-                      {preMatchResult.total_score.high}
+                      Expected: {preMatchResult.total_score.low} – {preMatchResult.total_score.high} runs
                     </Typography>
                   )}
                   {preMatchType === 'wickets' && preMatchResult.wickets && (
                     <Typography>
-                      Wickets range: {preMatchResult.wickets.low}-{preMatchResult.wickets.mid}-{preMatchResult.wickets.high}
+                      Expected: {preMatchResult.wickets.low} – {preMatchResult.wickets.high} wickets
                     </Typography>
                   )}
                   {preMatchType === 'powerplay' && preMatchResult.powerplay && (
                     <Typography>
-                      Powerplay range: {preMatchResult.powerplay.low}-{preMatchResult.powerplay.mid}-
-                      {preMatchResult.powerplay.high}
+                      Expected: {preMatchResult.powerplay.low} – {preMatchResult.powerplay.high} runs
                     </Typography>
                   )}
                 </Box>
@@ -505,7 +507,12 @@ const T20WorldCupPage: React.FC = () => {
                   <Paper sx={{ p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>
                     <Typography sx={{ color: palette.muted, fontSize: 12 }}>Winner</Typography>
                     <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
-                      {liveResult.winner?.team || 'Prediction pending'}
+                      {liveResult.winner?.probabilities
+                        ? Object.entries(liveResult.winner.probabilities)
+                            .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+                            .map(([team, p]) => `${team} ${Math.round((p ?? 0) * 100)}%`)
+                            .join(' \u00B7 ')
+                        : 'Prediction pending'}
                     </Typography>
                   </Paper>
                 )}
@@ -538,7 +545,7 @@ const T20WorldCupPage: React.FC = () => {
                     <Typography sx={{ color: palette.muted, fontSize: 12 }}>Wickets</Typography>
                     <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
                       {liveResult.wickets
-                        ? `${liveResult.wickets.low}-${liveResult.wickets.mid}-${liveResult.wickets.high}`
+                        ? `Expected: ${liveResult.wickets.low} – ${liveResult.wickets.high} wickets`
                         : 'Prediction pending'}
                     </Typography>
                   </Paper>
@@ -549,7 +556,7 @@ const T20WorldCupPage: React.FC = () => {
                     <Typography sx={{ color: palette.muted, fontSize: 12 }}>Powerplay</Typography>
                     <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
                       {liveResult.powerplay
-                        ? `${liveResult.powerplay.low}-${liveResult.powerplay.mid}-${liveResult.powerplay.high}`
+                        ? `Expected: ${liveResult.powerplay.low} – ${liveResult.powerplay.high} runs`
                         : 'Prediction pending'}
                     </Typography>
                   </Paper>
