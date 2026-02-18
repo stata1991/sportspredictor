@@ -4,9 +4,15 @@ from dataclasses import dataclass
 from statistics import mean, pstdev
 from typing import Dict, List, Optional
 
+import logging
+
 from backend.cache import cache
 from backend.config import FEATURE_TTL
 from backend.live_data_provider import fetch_series_matches_for_id, get_match_details
+
+logger = logging.getLogger(__name__)
+
+MAX_FEATURE_MATCHES = 10
 
 
 @dataclass
@@ -98,11 +104,19 @@ def build_series_features(series_id: int) -> SeriesFeatures:
     series_pp_ratios: List[float] = []
     chase_bands: Dict[str, List[int]] = {label: [] for _, _, label in TARGET_BANDS}
 
-    for match in matches:
+    completed = [
+        m for m in matches
+        if "won by" in (m.get("matchInfo", {}).get("status", "") or "").lower()
+    ]
+    completed.sort(key=lambda m: int(m.get("matchInfo", {}).get("startDate", 0)), reverse=True)
+    skipped = max(0, len(completed) - MAX_FEATURE_MATCHES)
+    completed = completed[:MAX_FEATURE_MATCHES]
+    logger.info("build_series_features: using %d of %d completed matches (skipped %d oldest)",
+                len(completed), len(completed) + skipped, skipped)
+
+    for match in completed:
         info = match.get("matchInfo", {})
         status = info.get("status", "")
-        if "won by" not in status.lower():
-            continue
         venue = info.get("venueInfo", {}).get("ground")
         scores = _extract_match_scores(match)
         if not scores or not venue:
