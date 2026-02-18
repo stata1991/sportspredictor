@@ -5,7 +5,7 @@ from datetime import datetime
 import math
 import logging
 
-from backend.feature_store import build_series_features, SeriesFeatures
+from backend.feature_store import build_series_features, SeriesFeatures, _band_for_target
 from backend.live_data_provider import fetch_live_data_for_series, get_match_details, UpstreamError
 
 logger = logging.getLogger(__name__)
@@ -149,11 +149,57 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
     data_quality = "good" if fallback_level == "venue" else "degraded"
 
     prediction_stage = "pre_toss"
+    toss_adjustment = None
     if match_id:
         details = get_match_details(match_id)
         if details and (details.get("toss_winner") or details.get("toss_decision") or details.get("playing_11")):
             prediction_stage = "post_toss"
             confidence = min(0.8, confidence + 0.05)
+
+            # --- Toss-based win probability adjustment ---
+            toss_winner = details.get("toss_winner")
+            toss_decision = (details.get("toss_decision") or "").lower()
+            if toss_winner and toss_decision:
+                if toss_decision in ("bat", "batting"):
+                    batting_first = toss_winner
+                    chasing_team = team2 if toss_winner == team1 else team1
+                else:  # "field", "bowl", "bowling"
+                    chasing_team = toss_winner
+                    batting_first = team2 if toss_winner == team1 else team1
+
+                chase_priors = features.chase_priors
+                if chase_priors:
+                    overall_chase_rate = sum(chase_priors.values()) / len(chase_priors)
+                    toss_delta = overall_chase_rate - 0.5
+                    toss_adjustment = {
+                        "source": "chase_priors",
+                        "overall_chase_rate": round(overall_chase_rate, 3),
+                        "delta": round(toss_delta, 3),
+                        "toss_winner": toss_winner,
+                        "toss_decision": toss_decision,
+                        "batting_first": batting_first,
+                        "chasing_team": chasing_team,
+                    }
+                else:
+                    toss_delta = 0.05
+                    toss_adjustment = {
+                        "source": "flat_default",
+                        "overall_chase_rate": 0.55,
+                        "delta": 0.05,
+                        "toss_winner": toss_winner,
+                        "toss_decision": toss_decision,
+                        "batting_first": batting_first,
+                        "chasing_team": chasing_team,
+                    }
+
+                win_probs[chasing_team] += toss_delta
+                win_probs[batting_first] -= toss_delta
+                for t in (team1, team2):
+                    win_probs[t] = max(0.05, min(0.95, win_probs[t]))
+                total_prob = win_probs[team1] + win_probs[team2]
+                win_probs = {t: p / total_prob for t, p in win_probs.items()}
+                winner_method += "+toss_adjusted"
+                logger.info("Toss adjustment applied: source=%s delta=%.3f chasing=%s", toss_adjustment["source"], toss_delta, chasing_team)
 
     winner_team = max(win_probs, key=win_probs.get)
 
@@ -179,6 +225,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
             "std_wkts": round(std_wkts, 2),
             "pp_ratio": round(pp_ratio, 3),
             "winner_method": winner_method,
+            "toss_adjustment": toss_adjustment,
             "team1_form": {"played": form1.played, "wins": form1.wins, "win_rate": round(form1.win_rate, 3)} if form1 else None,
             "team2_form": {"played": form2.played, "wins": form2.wins, "win_rate": round(form2.win_rate, 3)} if form2 else None,
         },
@@ -224,6 +271,97 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
     first_innings = min(innings, key=lambda x: x.get("inningsId", 0))
     first_team = first_innings.get("batTeamName")
     target = first_innings.get("score", 0) + 1 if batting_team and batting_team != first_team else None
+
+    # --- Detect innings break ---
+    first_inn_overs = float(first_innings.get("overs", 0.0))
+    first_inn_wkts = first_innings.get("wickets", 0) or 0
+    is_innings_break = False
+    if len(innings) == 1 and (first_inn_overs >= 20.0 or first_inn_wkts >= 10):
+        is_innings_break = True
+    elif len(innings) >= 2:
+        second_overs = float(current_innings.get("overs", 0.0))
+        second_score = current_innings.get("score", 0) or 0
+        if second_overs == 0 and second_score == 0 and (first_inn_overs >= 20.0 or first_inn_wkts >= 10):
+            is_innings_break = True
+
+    if is_innings_break:
+        first_innings_score = first_innings.get("score", 0) or 0
+        innings_break_target = first_innings_score + 1
+        team1 = match["team1"]["teamName"]
+        team2 = match["team2"]["teamName"]
+        venue = match["venueInfo"]["ground"]
+        chasing_team = team2 if first_team == team1 else team1
+
+        features = build_series_features(series_id)
+        band = _band_for_target(innings_break_target)
+        band_rate = features.chase_priors.get(band)
+
+        if band_rate is not None:
+            chase_win_prob = band_rate
+            chase_prior_source = "chase_priors"
+        else:
+            chase_win_prob = 0.55
+            chase_prior_source = "flat_default"
+
+        win_probs = {chasing_team: chase_win_prob, first_team: 1.0 - chase_win_prob}
+        for t in (team1, team2):
+            win_probs[t] = max(0.05, min(0.95, win_probs[t]))
+        total_prob = win_probs[team1] + win_probs[team2]
+        win_probs = {t: p / total_prob for t, p in win_probs.items()}
+        winner_team = max(win_probs, key=win_probs.get)
+
+        prior_source, avg_runs, std_runs, avg_wkts, std_wkts, pp_ratio, sample_size, fallback_reason = _resolve_priors(features, venue)
+        fallback_level = _fallback_level_for(prior_source)
+        confidence = 0.65 if band_rate is not None else 0.55
+        form1 = features.team_form.get(team1)
+        form2 = features.team_form.get(team2)
+
+        logger.info("Innings break detected: %s scored %d, target=%d, band=%s, rate=%s",
+                     first_team, first_innings_score, innings_break_target, band, band_rate)
+
+        return {
+            "prediction_stage": "innings_break",
+            "data_quality": "good" if fallback_level == "venue" else "degraded",
+            "fallback_level": fallback_level,
+            "fallback_reason": fallback_reason,
+            "sample_size": sample_size,
+            "confidence": round(confidence, 2),
+            "uncertainty": _uncertainty_from_confidence(confidence),
+            "match": {
+                "team1": team1,
+                "team2": team2,
+                "venue": venue,
+                "date": date,
+            },
+            "first_innings": {
+                "batting_team": first_team,
+                "score": first_innings_score,
+                "wickets": first_inn_wkts,
+                "overs": first_inn_overs,
+            },
+            "target": innings_break_target,
+            "features_used": {
+                "prior_source": prior_source,
+                "avg_runs": round(avg_runs, 2),
+                "std_runs": round(std_runs, 2),
+                "winner_method": "pre_chase_prior",
+                "chase_prior_used": {
+                    "band": band,
+                    "historical_rate": round(band_rate, 3) if band_rate is not None else None,
+                    "source": chase_prior_source,
+                },
+                "team1_form": {"played": form1.played, "wins": form1.wins, "win_rate": round(form1.win_rate, 3)} if form1 else None,
+                "team2_form": {"played": form2.played, "wins": form2.wins, "win_rate": round(form2.win_rate, 3)} if form2 else None,
+            },
+            "winner": {
+                "team": winner_team,
+                "probability": _round_prob(win_probs[winner_team], fallback_level),
+                "probabilities": {
+                    team1: _round_prob(win_probs[team1], fallback_level),
+                    team2: _round_prob(win_probs[team2], fallback_level),
+                },
+            },
+        }
 
     current_rr = (runs / overs) if overs > 0 else 0
     remaining_overs = max(0.0, 20.0 - overs)
@@ -273,13 +411,57 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
     pp_low = int(round(innings_range["low"] * pp_ratio))
     pp_mid = int(round(innings_range["mid"] * pp_ratio))
     pp_high = int(round(innings_range["high"] * pp_ratio))
-    total_score_range = _range_from_stats(avg_runs, max(std_runs, 12.0))
+    # --- Live-adjusted total_score_range ---
+    if target:
+        # 2nd innings: first innings total is known — no uncertainty
+        first_innings_total = int(target) - 1
+        total_score_range = {"low": first_innings_total, "mid": first_innings_total, "high": first_innings_total}
+    elif projected_final is not None and remaining_overs < 20.0:
+        # 1st innings in progress: use projection with shrinking uncertainty
+        live_std = max(std_runs, 12.0) * (remaining_overs / 20.0)
+        total_score_range = _range_from_stats(float(projected_final), live_std)
+    else:
+        # No live data yet — fall back to prior-based range
+        total_score_range = _range_from_stats(avg_runs, max(std_runs, 12.0))
 
     winner = None
     win_probs = None
+    chase_prior_used = None
     winner_method = "chase_projection"
     if chase_outcome:
-        winner = batting_team if chase_outcome.get("can_chase") else (team2 if batting_team == team1 else team1)
+        bowling_team = team2 if batting_team == team1 else team1
+        linear_signal = 1.0 if chase_outcome.get("can_chase") else 0.0
+
+        band = _band_for_target(int(target))
+        band_rate = features.chase_priors.get(band)
+
+        if band_rate is not None:
+            chase_win_prob = 0.6 * linear_signal + 0.4 * band_rate
+            winner_method = "chase_projection+chase_prior_blend"
+            chase_prior_used = {
+                "band": band,
+                "historical_rate": round(band_rate, 3),
+                "linear_signal": linear_signal,
+                "blend": "0.6*projection+0.4*historical",
+                "blended_chase_prob": round(chase_win_prob, 3),
+            }
+        else:
+            chase_win_prob = linear_signal
+            chase_prior_used = {
+                "band": band,
+                "historical_rate": None,
+                "linear_signal": linear_signal,
+                "blend": None,
+                "blended_chase_prob": chase_win_prob,
+            }
+
+        win_probs = {batting_team: chase_win_prob, bowling_team: 1.0 - chase_win_prob}
+        for t in (team1, team2):
+            win_probs[t] = max(0.05, min(0.95, win_probs[t]))
+        total_prob = win_probs[team1] + win_probs[team2]
+        win_probs = {t: p / total_prob for t, p in win_probs.items()}
+        winner = max(win_probs, key=win_probs.get)
+        logger.info("Chase blend: band=%s rate=%s linear=%.1f blended=%.3f", band, band_rate, linear_signal, chase_win_prob)
     else:
         form1 = features.team_form.get(team1)
         form2 = features.team_form.get(team2)
@@ -341,6 +523,7 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
             "std_wkts": round(std_wkts, 2),
             "pp_ratio": round(pp_ratio, 3),
             "winner_method": winner_method,
+            "chase_prior_used": chase_prior_used,
             "team1_form": {"played": form1.played, "wins": form1.wins, "win_rate": round(form1.win_rate, 3)} if form1 else None,
             "team2_form": {"played": form2.played, "wins": form2.wins, "win_rate": round(form2.win_rate, 3)} if form2 else None,
         },
