@@ -38,6 +38,18 @@ def _round_prob(prob: float, fallback_level: str) -> float:
     precision = 3 if fallback_level == "venue" else 2
     return round(prob, precision)
 
+def parse_winner_from_status(status: str) -> Optional[str]:
+    """Extract winning team from status like 'India won by 6 wickets'."""
+    if not status:
+        return None
+    idx = status.find("won by")
+    if idx == -1:
+        idx = status.find("Won by")
+    if idx == -1:
+        return None
+    return status[:idx].strip() or None
+
+
 def _range_from_stats(avg: float, std: float, cap: Optional[int] = None) -> Dict[str, int]:
     low = max(0, int(round(avg - std)))
     mid = max(0, int(round(avg)))
@@ -217,6 +229,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
             "prediction_stage": "completed",
             "match": {"team1": team1, "team2": team2, "venue": venue, "date": date},
             "status": match.get("status"),
+            "actual_winner": parse_winner_from_status(match.get("status", "")),
             "message": "Match already completed. Showing final status only.",
             "request_stats": get_request_stats(),
         }

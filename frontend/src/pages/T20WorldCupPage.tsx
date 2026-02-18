@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Typography, Button, Paper, Divider, CircularProgress, Tabs, Tab } from '@mui/material';
+import { Box, Typography, Button, Paper, Divider, CircularProgress, Tabs, Tab, Table, TableBody, TableCell, TableHead, TableRow } from '@mui/material';
 import SportsCricketIcon from '@mui/icons-material/SportsCricket';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
@@ -30,6 +30,8 @@ type PreMatchResponse = {
   wickets?: { low: number; mid: number; high: number };
   powerplay?: { low: number; mid: number; high: number };
   features_used?: { confidence_components?: Record<string, number> };
+  status?: string;
+  actual_winner?: string | null;
   error?: string;
   message?: string;
 };
@@ -73,6 +75,29 @@ const STAGE_LABELS: Record<string, string> = {
 
 const SERIES_ID = 11253;
 
+const ACCURACY_KEY = 't20wc_prediction_accuracy';
+
+type PredictionRecord = {
+  date: string;
+  match_label: string;
+  predicted_winner: string;
+  actual_winner: string | null;
+  correct: boolean | null;
+};
+
+function loadAccuracyRecords(): PredictionRecord[] {
+  try {
+    const raw = localStorage.getItem(ACCURACY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveAccuracyRecords(records: PredictionRecord[]): void {
+  localStorage.setItem(ACCURACY_KEY, JSON.stringify(records));
+}
+
 const T20WorldCupPage: React.FC = () => {
   const { loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -81,6 +106,7 @@ const T20WorldCupPage: React.FC = () => {
   const [matches, setMatches] = useState<MatchListItem[]>([]);
   const [message, setMessage] = useState('');
   const [activeTab, setActiveTab] = useState<'prematch' | 'live'>('prematch');
+  const [accuracyRecords, setAccuracyRecords] = useState<PredictionRecord[]>(loadAccuracyRecords);
 
   const [preMatchResult, setPreMatchResult] = useState<PreMatchResponse | null>(null);
   const [preMatchType, setPreMatchType] = useState<PredictionType>(null);
@@ -180,6 +206,36 @@ const T20WorldCupPage: React.FC = () => {
         setPreMatchResult(null);
       } else {
         setPreMatchResult(data);
+
+        // Track winner prediction accuracy
+        if (type === 'winner' && data.match) {
+          const matchLabel = `${data.match.team1} vs ${data.match.team2}`;
+          const records = loadAccuracyRecords();
+          const idx = records.findIndex(r => r.date === dateStr && r.match_label === matchLabel);
+
+          if (data.prediction_stage === 'completed' && data.actual_winner) {
+            if (idx >= 0) {
+              records[idx].actual_winner = data.actual_winner;
+              records[idx].correct = records[idx].predicted_winner === data.actual_winner;
+              saveAccuracyRecords(records);
+              setAccuracyRecords([...records]);
+            }
+          } else if (data.winner?.team && data.prediction_stage !== 'completed') {
+            if (idx >= 0) {
+              records[idx].predicted_winner = data.winner.team;
+            } else {
+              records.push({
+                date: dateStr,
+                match_label: matchLabel,
+                predicted_winner: data.winner.team,
+                actual_winner: null,
+                correct: null,
+              });
+            }
+            saveAccuracyRecords(records);
+            setAccuracyRecords([...records]);
+          }
+        }
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -509,6 +565,65 @@ const T20WorldCupPage: React.FC = () => {
           </Typography>
         )}
       </Paper>
+
+      {accuracyRecords.length > 0 && (() => {
+        const completed = accuracyRecords.filter(r => r.actual_winner != null);
+        const correct = completed.filter(r => r.correct).length;
+        const pct = completed.length > 0 ? Math.round((correct / completed.length) * 100) : 0;
+        return (
+          <Paper
+            elevation={0}
+            sx={{
+              width: '100%',
+              maxWidth: 860,
+              mt: 3,
+              p: { xs: 2, sm: 3 },
+              borderRadius: 3,
+              backgroundColor: palette.card,
+              border: `1px solid ${palette.border}`,
+            }}
+          >
+            <Typography sx={{ fontWeight: 700, mb: 2 }}>Winner Prediction Accuracy</Typography>
+            {completed.length > 0 ? (
+              <>
+                <Typography sx={{ color: palette.accent, fontSize: 14, mb: 2 }}>
+                  {correct} of {completed.length} predictions correct ({pct}% accuracy)
+                </Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ color: palette.muted, borderColor: palette.border, fontWeight: 600 }}>Date</TableCell>
+                      <TableCell sx={{ color: palette.muted, borderColor: palette.border, fontWeight: 600 }}>Match</TableCell>
+                      <TableCell sx={{ color: palette.muted, borderColor: palette.border, fontWeight: 600 }}>Predicted</TableCell>
+                      <TableCell sx={{ color: palette.muted, borderColor: palette.border, fontWeight: 600 }}>Actual</TableCell>
+                      <TableCell sx={{ color: palette.muted, borderColor: palette.border, fontWeight: 600 }}>Result</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {completed.map((r, i) => (
+                      <TableRow key={i}>
+                        <TableCell sx={{ color: palette.primary, borderColor: palette.border }}>
+                          {new Date(r.date + 'T00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </TableCell>
+                        <TableCell sx={{ color: palette.primary, borderColor: palette.border }}>{r.match_label}</TableCell>
+                        <TableCell sx={{ color: palette.primary, borderColor: palette.border }}>{r.predicted_winner}</TableCell>
+                        <TableCell sx={{ color: palette.primary, borderColor: palette.border }}>{r.actual_winner}</TableCell>
+                        <TableCell sx={{ borderColor: palette.border, color: r.correct ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                          {r.correct ? 'Correct' : 'Wrong'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </>
+            ) : (
+              <Typography sx={{ color: palette.muted, fontSize: 13 }}>
+                Accuracy will appear as matches complete
+              </Typography>
+            )}
+          </Paper>
+        );
+      })()}
 
       <Box
         sx={{
