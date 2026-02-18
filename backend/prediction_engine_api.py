@@ -22,6 +22,17 @@ LEAGUE_PRIORS = {
 
 DEATH_RATIO_DEFAULT = 0.27
 
+TEAM_STRENGTH: Dict[str, float] = {
+    "india": 0.92, "england": 0.88, "australia": 0.87,
+    "south africa": 0.85, "west indies": 0.82, "pakistan": 0.81,
+    "new zealand": 0.80, "sri lanka": 0.75, "afghanistan": 0.74,
+    "bangladesh": 0.70, "zimbabwe": 0.62, "ireland": 0.58,
+    "scotland": 0.55, "namibia": 0.52, "nepal": 0.51,
+    "oman": 0.50, "uae": 0.49, "canada": 0.47,
+    "usa": 0.46, "italy": 0.38, "kenya": 0.40,
+    "nigeria": 0.38, "tanzania": 0.37,
+}
+
 
 class MatchNotFound(Exception):
     pass
@@ -125,6 +136,67 @@ def _fallback_level_for(prior_source: str) -> str:
     if prior_source == "series":
         return "series"
     return "league"
+
+
+def _blend_winner_probability(
+    team1: str, team2: str, features: SeriesFeatures,
+) -> Tuple[Dict[str, float], str, Dict]:
+    """Blend series form + global team strength into win probabilities.
+
+    Returns (win_probs, method, debug_info).
+    """
+    form1 = features.team_form.get(team1)
+    form2 = features.team_form.get(team2)
+
+    # --- Signal 1: series form ---
+    t1_matches = form1.played if form1 else 0
+    t2_matches = form2.played if form2 else 0
+    n = min(t1_matches, t2_matches)
+
+    series_signal = None
+    if form1 and form2 and (form1.win_rate + form2.win_rate) > 0:
+        series_signal = form1.win_rate / (form1.win_rate + form2.win_rate)
+
+    # --- Signal 2: global team strength ---
+    s1 = TEAM_STRENGTH.get(team1.lower(), 0.5)
+    s2 = TEAM_STRENGTH.get(team2.lower(), 0.5)
+    strength_signal = s1 / (s1 + s2)
+
+    # --- Blend weights ---
+    series_weight = min(1.0, n / 8.0)
+    strength_weight = 1.0 - series_weight
+
+    if series_signal is not None:
+        prob_t1 = series_weight * series_signal + strength_weight * strength_signal
+        method = "strength+series_blend"
+    else:
+        prob_t1 = strength_signal
+        method = "strength_only"
+
+    # Clamp to [0.10, 0.90]
+    prob_t1 = max(0.10, min(0.90, prob_t1))
+    prob_t2 = 1.0 - prob_t1
+
+    win_probs = {team1: prob_t1, team2: prob_t2}
+    debug = {
+        "series_signal": round(series_signal, 3) if series_signal is not None else None,
+        "series_weight": round(series_weight, 3),
+        "strength_signal": round(strength_signal, 3),
+        "strength_weight": round(strength_weight, 3),
+        "team1_strength": s1,
+        "team2_strength": s2,
+        "team1_matches": t1_matches,
+        "team2_matches": t2_matches,
+        "final_prob_team1": round(prob_t1, 3),
+    }
+
+    logger.info("Winner blend: %s method=%s series=%.3f(w=%.2f) strength=%.3f(w=%.2f) → %s=%.3f",
+                team1, method,
+                series_signal if series_signal is not None else 0.0, series_weight,
+                strength_signal, strength_weight,
+                team1, prob_t1)
+
+    return win_probs, method, debug
 
 
 def _pick_match(series_id: int, date: str, match_number: int = 0):
@@ -253,12 +325,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
     form1 = features.team_form.get(team1)
     form2 = features.team_form.get(team2)
 
-    win_probs = {team1: 0.5, team2: 0.5}
-    winner_method = "default_50_50"
-    if form1 and form2 and (form1.win_rate + form2.win_rate) > 0:
-        total_rate = form1.win_rate + form2.win_rate
-        win_probs = {team1: form1.win_rate / total_rate, team2: form2.win_rate / total_rate}
-        winner_method = "series_form_ratio"
+    win_probs, winner_method, winner_blend = _blend_winner_probability(team1, team2, features)
 
     prior_source, avg_runs, std_runs, avg_wkts, std_wkts, pp_ratio, sample_size, fallback_reason = _resolve_priors(features, venue)
 
@@ -325,7 +392,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
                 win_probs[chasing_team] += toss_delta
                 win_probs[batting_first] -= toss_delta
                 for t in (team1, team2):
-                    win_probs[t] = max(0.05, min(0.95, win_probs[t]))
+                    win_probs[t] = max(0.10, min(0.90, win_probs[t]))
                 total_prob = win_probs[team1] + win_probs[team2]
                 win_probs = {t: p / total_prob for t, p in win_probs.items()}
                 winner_method += "+toss_adjusted"
@@ -355,6 +422,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
             "std_wkts": round(std_wkts, 2),
             "pp_ratio": round(pp_ratio, 3),
             "winner_method": winner_method,
+            "winner_blend": winner_blend,
             "toss_adjustment": toss_adjustment,
             "confidence_components": confidence_components,
             "pp_model": pp_model,
@@ -646,17 +714,7 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
         winner = max(win_probs, key=win_probs.get)
         logger.info("Chase blend: band=%s rate=%s linear=%.1f blended=%.3f", band, band_rate, linear_signal, chase_win_prob)
     else:
-        form1 = features.team_form.get(team1)
-        form2 = features.team_form.get(team2)
-        if not form1 or not form2:
-            return {"error": "Insufficient data for winner prediction.", "request_stats": get_request_stats()}
-        total_rate = form1.win_rate + form2.win_rate
-        if total_rate == 0:
-            win_probs = {team1: 0.5, team2: 0.5}
-            winner_method = "default_50_50"
-        else:
-            win_probs = {team1: form1.win_rate / total_rate, team2: form2.win_rate / total_rate}
-            winner_method = "series_form_ratio"
+        win_probs, winner_method, _ = _blend_winner_probability(team1, team2, features)
         winner = max(win_probs, key=win_probs.get)
 
     form1 = features.team_form.get(team1)
