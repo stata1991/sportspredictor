@@ -213,10 +213,13 @@ def build_series_features(series_id: int) -> SeriesFeatures:
         if len(runs) < 2 or len(wkts) < 2:
             continue
         pp_list = venue_pp_ratio.get(venue)
+        raw_avg_wkts = mean(wkts)
+        if raw_avg_wkts < 5.0:
+            logger.warning("Suspiciously low wicket average: %.1f for venue '%s' — check data source", raw_avg_wkts, venue)
         venue_priors[venue] = VenuePriors(
             avg_innings_runs=mean(runs),
             std_innings_runs=pstdev(runs),
-            avg_innings_wkts=mean(wkts),
+            avg_innings_wkts=max(raw_avg_wkts, 5.5),
             std_innings_wkts=pstdev(wkts),
             pp_ratio=mean(pp_list) if pp_list else None,
             sample_size=len(runs) // 2,
@@ -229,10 +232,13 @@ def build_series_features(series_id: int) -> SeriesFeatures:
 
     series_priors = None
     if len(series_runs) >= 2 and len(series_wkts) >= 2:
+        raw_series_wkts = mean(series_wkts)
+        if raw_series_wkts < 5.0:
+            logger.warning("Suspiciously low wicket average: %.1f for series %s — check data source", raw_series_wkts, series_id)
         series_priors = SeriesPriors(
             avg_innings_runs=mean(series_runs),
             std_innings_runs=pstdev(series_runs),
-            avg_innings_wkts=mean(series_wkts),
+            avg_innings_wkts=max(raw_series_wkts, 5.5),
             std_innings_wkts=pstdev(series_wkts),
             pp_ratio=mean(series_pp_ratios) if series_pp_ratios else None,
             sample_size=len(series_runs) // 2,

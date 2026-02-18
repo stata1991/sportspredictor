@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
 LEAGUE_PRIORS = {
     "avg_runs": 160.0,
     "std_runs": 25.0,
-    "avg_wkts": 7.0,
-    "std_wkts": 2.5,
+    "avg_wkts": 7.2,
+    "std_wkts": 1.8,
     "pp_ratio": 0.28,
 }
 
@@ -400,8 +400,15 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
 
     winner_team = max(win_probs, key=win_probs.get)
 
+    # Build batting context subtitle for score/wickets/powerplay cards
+    if toss_adjustment and toss_adjustment.get("batting_first"):
+        batting_context = f"1st innings estimate \u00B7 {toss_adjustment['batting_first']} batting first"
+    else:
+        batting_context = "1st innings estimate \u00B7 either team batting"
+
     return {
         "prediction_stage": prediction_stage,
+        "batting_context": batting_context,
         "data_quality": data_quality,
         "fallback_level": fallback_level,
         "fallback_reason": fallback_reason,
@@ -761,6 +768,7 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
 
     return {
         "prediction_stage": "live",
+        "batting_context": f"{batting_team} batting \u00B7 over {overs}",
         "data_quality": data_quality,
         "fallback_level": fallback_level,
         "fallback_reason": fallback_reason,

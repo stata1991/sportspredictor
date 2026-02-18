@@ -19,6 +19,7 @@ type MatchListItem = {
 };
 
 type PreMatchResponse = {
+  batting_context?: string;
   match?: { team1: string; team2: string; venue: string; date: string };
   winner?: { probabilities: Record<string, number> };
   total_score?: { low: number; high: number };
@@ -262,6 +263,11 @@ const PreMatchPage: React.FC = () => {
                 color: '#00E5FF',
               }}
             >
+              {result.batting_context && activeType !== 'winner' && !result.message && (
+                <Typography sx={{ color: '#94a3b8', fontSize: '0.85rem', mb: 1 }}>
+                  {result.batting_context}
+                </Typography>
+              )}
               {result.message && (
                 <Typography>{result.message}</Typography>
               )}

@@ -20,6 +20,7 @@ type MatchListItem = {
 
 type PreMatchResponse = {
   prediction_stage?: string;
+  batting_context?: string;
   data_quality?: string;
   fallback_level?: string;
   confidence?: number;
@@ -38,6 +39,7 @@ type PreMatchResponse = {
 
 type LiveResponse = {
   prediction_stage?: string;
+  batting_context?: string;
   data_quality?: string;
   fallback_level?: string;
   confidence?: number;
@@ -413,9 +415,11 @@ const T20WorldCupPage: React.FC = () => {
                     )}
                   </Box>
                 )}
-                <Typography sx={{ color: palette.muted, fontSize: 12 }}>
-                  Pre-match output {preMatchType ? `- ${preMatchType}` : ''}
-                </Typography>
+                {preMatchResult.batting_context && preMatchType !== 'winner' && !preMatchResult.message && (
+                  <Typography sx={{ color: palette.muted, fontSize: 12, mt: 0.5 }}>
+                    {preMatchResult.batting_context}
+                  </Typography>
+                )}
                 <Box sx={{ color: palette.primary, fontSize: 14, mt: 1 }}>
                   {preMatchResult.message && (
                     <Typography>{preMatchResult.message}</Typography>
@@ -520,6 +524,9 @@ const T20WorldCupPage: React.FC = () => {
                 {liveType === 'score' && (
                   <Paper sx={{ p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>
                     <Typography sx={{ color: palette.muted, fontSize: 12 }}>Total score</Typography>
+                    {liveResult.batting_context && (
+                      <Typography sx={{ color: palette.muted, fontSize: 11 }}>{liveResult.batting_context}</Typography>
+                    )}
                     <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
                       {liveResult.projected_total || 'Prediction pending'}
                     </Typography>
@@ -543,6 +550,9 @@ const T20WorldCupPage: React.FC = () => {
                 {liveType === 'wickets' && (
                   <Paper sx={{ p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>
                     <Typography sx={{ color: palette.muted, fontSize: 12 }}>Wickets</Typography>
+                    {liveResult.batting_context && (
+                      <Typography sx={{ color: palette.muted, fontSize: 11 }}>{liveResult.batting_context}</Typography>
+                    )}
                     <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
                       {liveResult.wickets
                         ? `Expected: ${liveResult.wickets.low} – ${liveResult.wickets.high} wickets`
@@ -554,6 +564,9 @@ const T20WorldCupPage: React.FC = () => {
                 {liveType === 'powerplay' && (
                   <Paper sx={{ p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>
                     <Typography sx={{ color: palette.muted, fontSize: 12 }}>Powerplay</Typography>
+                    {liveResult.batting_context && (
+                      <Typography sx={{ color: palette.muted, fontSize: 11 }}>{liveResult.batting_context}</Typography>
+                    )}
                     <Typography sx={{ fontWeight: 700, fontSize: 20 }}>
                       {liveResult.powerplay
                         ? `Expected: ${liveResult.powerplay.low} – ${liveResult.powerplay.high} runs`
