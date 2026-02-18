@@ -20,17 +20,10 @@ correlation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("correl
 logger = logging.getLogger(__name__)
 
 
-class _CorrelationFilter(logging.Filter):
-    def filter(self, record):
-        record.correlation_id = correlation_id_var.get("-")
-        return True
-
-
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(correlation_id)s] %(name)s: %(message)s",
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
-logging.getLogger().addFilter(_CorrelationFilter())
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
