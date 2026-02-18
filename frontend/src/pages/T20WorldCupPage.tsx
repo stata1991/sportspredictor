@@ -7,6 +7,7 @@ import WbSunnyIcon from '@mui/icons-material/WbSunny';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
 import ConfidenceBadge from '../components/ConfidenceBadge';
+import DecisionMomentCard from '../components/DecisionMomentCard';
 import homeBg from '../non-home.png';
 
 type MatchListItem = {
@@ -54,6 +55,7 @@ type LiveResponse = {
   wickets?: { low: number; mid: number; high: number } | null;
   powerplay?: { low: number; mid: number; high: number } | null;
   features_used?: { confidence_components?: Record<string, number> };
+  decision_moment?: { moment_type: string; headline: string; detail: string; urgency: 'high' | 'medium' | 'low' };
   error?: string;
   message?: string;
 };
@@ -433,6 +435,9 @@ const T20WorldCupPage: React.FC = () => {
                       />
                     )}
                   </Box>
+                )}
+                {liveResult.decision_moment && (
+                  <DecisionMomentCard moment={liveResult.decision_moment} />
                 )}
                 {lastUpdated && (
                   <Typography sx={{ color: palette.muted, fontSize: 11, textAlign: 'right' }}>

@@ -6,6 +6,7 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import WbSunnyIcon from '@mui/icons-material/WbSunny';
 import api from '../api';
 import ConfidenceBadge from '../components/ConfidenceBadge';
+import DecisionMomentCard from '../components/DecisionMomentCard';
 import homeBg from '../non-home.png';
 
 type MatchListItem = {
@@ -32,6 +33,7 @@ type LiveResponse = {
   prediction_stage?: string;
   confidence?: number;
   features_used?: { confidence_components?: Record<string, number> };
+  decision_moment?: { moment_type: string; headline: string; detail: string; urgency: 'high' | 'medium' | 'low' };
   error?: string;
   message?: string;
 };
@@ -286,6 +288,9 @@ const LiveMatchPage: React.FC = () => {
                   />
                 )}
               </Box>
+            )}
+            {result.decision_moment && (
+              <DecisionMomentCard moment={result.decision_moment} />
             )}
             {lastUpdated && (
               <Typography sx={{ color: palette.muted, fontSize: 11, textAlign: 'right' }}>

@@ -7,6 +7,7 @@ import logging
 
 from backend.feature_store import build_series_features, SeriesFeatures, _band_for_target
 from backend.live_data_provider import fetch_live_data_for_series, get_match_details, UpstreamError, reset_request_stats, get_request_stats
+from backend.decision_engine import get_decision_moment
 
 logger = logging.getLogger(__name__)
 
@@ -480,6 +481,12 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
                     team2: _round_prob(win_probs[team2], fallback_level),
                 },
             },
+            "decision_moment": {
+                "moment_type": "MATCH_SITUATION",
+                "headline": f"Innings break — {first_team} posted {first_innings_score}, {chasing_team} need {innings_break_target}",
+                "detail": f"Target {innings_break_target} to win",
+                "urgency": "low",
+            },
             "request_stats": get_request_stats(),
         }
 
@@ -648,6 +655,23 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
     confidence, confidence_components = _calibrated_confidence(fallback_level, sample_size, overs=overs, is_live=True)
     data_quality = "good" if fallback_level == "venue" else "degraded"
 
+    # --- Decision moment ---
+    bowling_team = team2 if batting_team == team1 else team1
+    pp_data = details.get("powerplay", {})
+    pp_score = pp_data.get(batting_team, {}).get("runs") if pp_data else None
+    decision_moment = get_decision_moment(
+        batting_team=batting_team,
+        bowling_team=bowling_team,
+        runs=runs,
+        wickets=wickets,
+        overs=overs,
+        current_rr=current_rr,
+        target=target,
+        avg_runs=avg_runs,
+        pp_ratio=pp_ratio,
+        pp_score=pp_score,
+    )
+
     chase_payload = None
     if chase_outcome:
         chase_payload = {
@@ -712,5 +736,6 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
         "chase": chase_payload,
         "wickets": wickets_range,
         "powerplay": powerplay_range,
+        "decision_moment": decision_moment,
         "request_stats": get_request_stats(),
     }
