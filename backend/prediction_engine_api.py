@@ -19,6 +19,9 @@ LEAGUE_PRIORS = {
 }
 
 
+DEATH_RATIO_DEFAULT = 0.27
+
+
 class MatchNotFound(Exception):
     pass
 
@@ -45,6 +48,63 @@ def _range_from_stats(avg: float, std: float, cap: Optional[int] = None) -> Dict
     return {"low": low, "mid": mid, "high": high}
 
 
+def _calibrated_confidence(
+    fallback_level: str, sample_size: int, overs: float = 0.0, is_live: bool = False,
+) -> Tuple[float, Dict]:
+    """Compute confidence from sample size instead of hardcoded tiers."""
+    base = 0.48
+    sample_bonus = 0.10 * min(1.0, sample_size / 20.0) if fallback_level in ("series", "venue") else 0.0
+    venue_bonus = 0.05 if fallback_level == "venue" else 0.0
+    live_bonus = (overs / 20.0) * 0.15 if is_live else 0.0
+
+    raw = base + sample_bonus + venue_bonus + live_bonus
+    capped = min(0.92, round(raw, 4))
+
+    components = {
+        "base": base,
+        "sample_bonus": round(sample_bonus, 4),
+        "venue_bonus": venue_bonus,
+        "live_bonus": round(live_bonus, 4),
+        "raw": round(raw, 4),
+        "capped": round(capped, 2),
+    }
+    return capped, components
+
+
+def _powerplay_model(
+    avg_runs: float, std_runs: float, pp_ratio: float,
+    overs: float = 0.0, runs: int = 0, is_live: bool = False,
+) -> Tuple[Dict[str, int], Dict]:
+    """Independent powerplay projection.
+
+    Pre-match / post-PP: prior-based range from pp_ratio.
+    Live in PP (overs < 6): actual runs + remaining PP overs at team_pp_rpo.
+    """
+    team_pp_rpo = pp_ratio * avg_runs / 6.0
+    pp_std = max(std_runs, 12.0) * pp_ratio
+
+    if is_live and overs < 6.0 and overs > 0:
+        remaining_pp = max(0.0, 6.0 - overs)
+        pp_mid = int(round(runs + team_pp_rpo * remaining_pp))
+        shrink = remaining_pp / 6.0
+        pp_low = max(runs, int(round(pp_mid - pp_std * shrink)))
+        pp_high = int(round(pp_mid + pp_std * shrink))
+        source = "live_projection"
+    else:
+        pp_mid = int(round(avg_runs * pp_ratio))
+        pp_low = max(0, int(round(pp_mid - pp_std)))
+        pp_high = int(round(pp_mid + pp_std))
+        source = "prior"
+
+    pp_range = {"low": min(pp_low, pp_high), "mid": pp_mid, "high": max(pp_low, pp_high)}
+    pp_model_info = {
+        "source": source,
+        "team_pp_rpo": round(team_pp_rpo, 2),
+        "pp_ratio_used": round(pp_ratio, 3),
+    }
+    return pp_range, pp_model_info
+
+
 def _fallback_level_for(prior_source: str) -> str:
     if prior_source == "venue":
         return "venue"
@@ -58,6 +118,57 @@ def _pick_match(series_id: int, date: str, match_number: int = 0):
     if not matches or match_number >= len(matches):
         return None
     return matches[match_number]
+
+
+def _phase_projected_total(
+    runs: int, overs: float, avg_runs: float, pp_ratio: float,
+) -> Tuple[Optional[int], Optional[Dict]]:
+    """Phase-aware projected total for 1st innings.
+
+    Splits the innings into three phases with distinct RPO defaults derived
+    from venue/series priors, then projects remaining runs per phase.
+    """
+    if overs <= 0:
+        return None, None
+
+    death_ratio = DEATH_RATIO_DEFAULT
+    middle_ratio = max(0.0, 1.0 - pp_ratio - death_ratio)
+
+    pp_rpo = (avg_runs * pp_ratio) / 6.0
+    middle_rpo = (avg_runs * middle_ratio) / 9.0
+    death_rpo = (avg_runs * death_ratio) / 5.0
+
+    if overs <= 6.0:
+        current_phase = "powerplay"
+    elif overs <= 15.0:
+        current_phase = "middle"
+    else:
+        current_phase = "death"
+
+    projected = float(runs)
+
+    if current_phase == "powerplay":
+        remaining_pp = max(0.0, 6.0 - overs)
+        projected += pp_rpo * remaining_pp
+        projected += middle_rpo * 9.0
+        projected += death_rpo * 5.0
+    elif current_phase == "middle":
+        remaining_mid = max(0.0, 15.0 - overs)
+        projected += middle_rpo * remaining_mid
+        projected += death_rpo * 5.0
+    else:
+        remaining_death = max(0.0, 20.0 - overs)
+        projected += death_rpo * remaining_death
+
+    phase_model = {
+        "current_phase": current_phase,
+        "pp_rpo": round(pp_rpo, 2),
+        "middle_rpo": round(middle_rpo, 2),
+        "death_rpo": round(death_rpo, 2),
+        "projected_total": int(round(projected)),
+    }
+
+    return int(round(projected)), phase_model
 
 
 def _resolve_priors(features: SeriesFeatures, venue: str) -> Tuple[str, float, float, float, float, float, int, str]:
@@ -135,9 +246,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
     innings_range = _range_from_stats(avg_runs, max(std_runs, 12.0))
     wickets_range = _range_from_stats(avg_wkts, max(std_wkts, 2.0), cap=10)
     total_score_range = _range_from_stats(avg_runs, max(std_runs, 12.0))
-    pp_low = int(round(innings_range["low"] * pp_ratio))
-    pp_mid = int(round(innings_range["mid"] * pp_ratio))
-    pp_high = int(round(innings_range["high"] * pp_ratio))
+    powerplay_range, pp_model = _powerplay_model(avg_runs, std_runs, pp_ratio)
 
     fallback_levels = [_fallback_level_for(prior_source)]
     if not (form1 and form2):
@@ -145,7 +254,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
         fallback_reason += "; team form unavailable for one or both teams"
 
     fallback_level = "league" if "league" in fallback_levels else "series" if "series" in fallback_levels else "venue"
-    confidence = 0.7 if fallback_level == "venue" else 0.58 if fallback_level == "series" else 0.48
+    confidence, confidence_components = _calibrated_confidence(fallback_level, sample_size)
     data_quality = "good" if fallback_level == "venue" else "degraded"
 
     prediction_stage = "pre_toss"
@@ -154,7 +263,9 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
         details = get_match_details(match_id)
         if details and (details.get("toss_winner") or details.get("toss_decision") or details.get("playing_11")):
             prediction_stage = "post_toss"
-            confidence = min(0.8, confidence + 0.05)
+            confidence = min(0.92, confidence + 0.05)
+            confidence_components["toss_bonus"] = 0.05
+            confidence_components["capped"] = round(confidence, 2)
 
             # --- Toss-based win probability adjustment ---
             toss_winner = details.get("toss_winner")
@@ -226,6 +337,8 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
             "pp_ratio": round(pp_ratio, 3),
             "winner_method": winner_method,
             "toss_adjustment": toss_adjustment,
+            "confidence_components": confidence_components,
+            "pp_model": pp_model,
             "team1_form": {"played": form1.played, "wins": form1.wins, "win_rate": round(form1.win_rate, 3)} if form1 else None,
             "team2_form": {"played": form2.played, "wins": form2.wins, "win_rate": round(form2.win_rate, 3)} if form2 else None,
         },
@@ -239,7 +352,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
         },
         "total_score": total_score_range,
         "wickets": wickets_range,
-        "powerplay": {"low": min(pp_low, pp_high), "mid": pp_mid, "high": max(pp_low, pp_high)},
+        "powerplay": powerplay_range,
     }
 
 
@@ -312,7 +425,7 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
 
         prior_source, avg_runs, std_runs, avg_wkts, std_wkts, pp_ratio, sample_size, fallback_reason = _resolve_priors(features, venue)
         fallback_level = _fallback_level_for(prior_source)
-        confidence = 0.65 if band_rate is not None else 0.55
+        confidence, confidence_components = _calibrated_confidence(fallback_level, sample_size, overs=20.0, is_live=True)
         form1 = features.team_form.get(team1)
         form2 = features.team_form.get(team2)
 
@@ -350,6 +463,7 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
                     "historical_rate": round(band_rate, 3) if band_rate is not None else None,
                     "source": chase_prior_source,
                 },
+                "confidence_components": confidence_components,
                 "team1_form": {"played": form1.played, "wins": form1.wins, "win_rate": round(form1.win_rate, 3)} if form1 else None,
                 "team2_form": {"played": form2.played, "wins": form2.wins, "win_rate": round(form2.win_rate, 3)} if form2 else None,
             },
@@ -363,9 +477,59 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
             },
         }
 
+    features = build_series_features(series_id)
+    venue = match["venueInfo"]["ground"]
+    team1 = match["team1"]["teamName"]
+    team2 = match["team2"]["teamName"]
+
+    prior_source, avg_runs, std_runs, avg_wkts, std_wkts, pp_ratio, sample_size, fallback_reason = _resolve_priors(features, venue)
+
     current_rr = (runs / overs) if overs > 0 else 0
     remaining_overs = max(0.0, 20.0 - overs)
-    projected_final = int(round(runs + current_rr * remaining_overs)) if overs > 0 else None
+
+    # --- Phase-aware projection for 1st innings; simple for chase ---
+    phase_model = None
+    if target is None and overs > 0:
+        projected_final, phase_model = _phase_projected_total(runs, overs, avg_runs, pp_ratio)
+    else:
+        projected_final = int(round(runs + current_rr * remaining_overs)) if overs > 0 else None
+
+    # --- Wickets-in-hand pressure for chase ---
+    wickets_pressure = None
+    if target and projected_final is not None:
+        wickets_in_hand = 10 - wickets
+        if wickets_in_hand >= 8:
+            wkt_multiplier = 1.0
+        elif wickets_in_hand >= 6:
+            wkt_multiplier = 0.92
+        elif wickets_in_hand >= 4:
+            wkt_multiplier = 0.80
+        elif wickets_in_hand >= 2:
+            wkt_multiplier = 0.65
+        else:
+            wkt_multiplier = 0.45
+
+        rrr_pressure = 1.0
+        if current_rr > 0:
+            required_rr_raw = (target - runs) / (remaining_overs if remaining_overs > 0 else 0.1)
+            if required_rr_raw / current_rr > 1.5:
+                rrr_pressure = 0.85
+
+        combined_multiplier = wkt_multiplier * rrr_pressure
+        adjusted_projection = int(round(projected_final * combined_multiplier))
+
+        wickets_pressure = {
+            "wickets_in_hand": wickets_in_hand,
+            "wkt_multiplier": wkt_multiplier,
+            "rrr_crr_ratio": round(required_rr_raw / current_rr, 2) if current_rr > 0 else None,
+            "rrr_pressure": rrr_pressure,
+            "combined_multiplier": round(combined_multiplier, 3),
+            "raw_projection": projected_final,
+            "adjusted_projection": adjusted_projection,
+        }
+        projected_final = adjusted_projection
+        logger.info("Wickets pressure: wih=%d mult=%.3f rrr_p=%.2f raw=%d adj=%d",
+                     wickets_in_hand, wkt_multiplier, rrr_pressure, wickets_pressure["raw_projection"], adjusted_projection)
 
     chase = None
     chase_outcome = None
@@ -399,18 +563,9 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
                     "short_by": int(math.ceil(target - projected_final)),
                 }
 
-    features = build_series_features(series_id)
-    venue = match["venueInfo"]["ground"]
-    team1 = match["team1"]["teamName"]
-    team2 = match["team2"]["teamName"]
-
-    prior_source, avg_runs, std_runs, avg_wkts, std_wkts, pp_ratio, sample_size, fallback_reason = _resolve_priors(features, venue)
-
     innings_range = _range_from_stats(avg_runs, max(std_runs, 12.0))
     wickets_range = _range_from_stats(avg_wkts, max(std_wkts, 2.0), cap=10)
-    pp_low = int(round(innings_range["low"] * pp_ratio))
-    pp_mid = int(round(innings_range["mid"] * pp_ratio))
-    pp_high = int(round(innings_range["high"] * pp_ratio))
+    powerplay_range, pp_model = _powerplay_model(avg_runs, std_runs, pp_ratio, overs=overs, runs=runs, is_live=True)
     # --- Live-adjusted total_score_range ---
     if target:
         # 2nd innings: first innings total is known — no uncertainty
@@ -484,7 +639,7 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
         fallback_levels.append("league")
         fallback_reason += "; team form unavailable for one or both teams"
     fallback_level = "league" if "league" in fallback_levels else "series" if "series" in fallback_levels else "venue"
-    confidence = 0.72 if fallback_level == "venue" else 0.6 if fallback_level == "series" else 0.48
+    confidence, confidence_components = _calibrated_confidence(fallback_level, sample_size, overs=overs, is_live=True)
     data_quality = "good" if fallback_level == "venue" else "degraded"
 
     chase_payload = None
@@ -524,6 +679,10 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
             "pp_ratio": round(pp_ratio, 3),
             "winner_method": winner_method,
             "chase_prior_used": chase_prior_used,
+            "phase_model": phase_model,
+            "wickets_pressure": wickets_pressure,
+            "confidence_components": confidence_components,
+            "pp_model": pp_model,
             "team1_form": {"played": form1.played, "wins": form1.wins, "win_rate": round(form1.win_rate, 3)} if form1 else None,
             "team2_form": {"played": form2.played, "wins": form2.wins, "win_rate": round(form2.win_rate, 3)} if form2 else None,
         },
@@ -546,5 +705,5 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
         "total_score": total_score_range,
         "chase": chase_payload,
         "wickets": wickets_range,
-        "powerplay": {"low": min(pp_low, pp_high), "mid": pp_mid, "high": max(pp_low, pp_high)},
+        "powerplay": powerplay_range,
     }
