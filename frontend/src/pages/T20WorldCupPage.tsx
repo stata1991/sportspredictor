@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Typography, Button, Paper, Divider, CircularProgress, Tabs, Tab } from '@mui/material';
 import SportsCricketIcon from '@mui/icons-material/SportsCricket';
 import FlashOnIcon from '@mui/icons-material/FlashOn';
@@ -6,6 +6,7 @@ import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import WbSunnyIcon from '@mui/icons-material/WbSunny';
 import { useAuth } from '../context/AuthContext';
 import api from '../api';
+import ConfidenceBadge from '../components/ConfidenceBadge';
 import homeBg from '../non-home.png';
 
 type MatchListItem = {
@@ -27,6 +28,7 @@ type PreMatchResponse = {
   total_score?: { low: number; mid: number; high: number };
   wickets?: { low: number; mid: number; high: number };
   powerplay?: { low: number; mid: number; high: number };
+  features_used?: { confidence_components?: Record<string, number> };
   error?: string;
   message?: string;
 };
@@ -51,11 +53,21 @@ type LiveResponse = {
   } | null;
   wickets?: { low: number; mid: number; high: number } | null;
   powerplay?: { low: number; mid: number; high: number } | null;
+  features_used?: { confidence_components?: Record<string, number> };
   error?: string;
   message?: string;
 };
 
 type PredictionType = 'winner' | 'score' | 'wickets' | 'powerplay' | null;
+
+const STAGE_LABELS: Record<string, string> = {
+  pre_toss: 'Pre-toss analysis — based on historical priors only',
+  post_toss: 'Post-toss — toss result factored in',
+  innings_break: 'Innings break — projecting chase outcome',
+  live: 'Live — updating every 30s',
+  completed: 'Match completed — final analysis',
+  chase: 'Chase in progress — tracking target',
+};
 
 const SERIES_ID = 11253;
 
@@ -73,6 +85,13 @@ const T20WorldCupPage: React.FC = () => {
 
   const [liveResult, setLiveResult] = useState<LiveResponse | null>(null);
   const [liveType, setLiveType] = useState<PredictionType>(null);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [secondsAgo, setSecondsAgo] = useState(0);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dateStrRef = useRef(dateStr);
+  dateStrRef.current = dateStr;
+  const matchNumberRef = useRef(matchNumber);
+  matchNumberRef.current = matchNumber;
 
   const palette = useMemo(
     () => ({
@@ -106,6 +125,43 @@ const T20WorldCupPage: React.FC = () => {
 
     fetchMatches();
   }, [dateStr, matchNumber]);
+
+  // Auto-refresh: poll every 30s while live tab is active and match is not completed
+  const livePredictionStage = liveResult?.prediction_stage;
+  useEffect(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (!livePredictionStage || livePredictionStage === 'completed' || activeTab !== 'live') return;
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await api.get('/predict/live', {
+          params: { series_id: SERIES_ID, date: dateStrRef.current, match_number: matchNumberRef.current },
+        });
+        const data: LiveResponse = res.data;
+        if (!data.error) {
+          setLiveResult(data);
+          setLastUpdated(Date.now());
+        }
+      } catch { /* silent refresh failure */ }
+    }, 30_000);
+
+    return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
+  }, [livePredictionStage, activeTab]);
+
+  // Stop polling on date/match change
+  useEffect(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    setLastUpdated(null);
+  }, [dateStr, matchNumber]);
+
+  // Tick counter for "updated X seconds ago"
+  useEffect(() => {
+    if (!lastUpdated) { setSecondsAgo(0); return; }
+    const id = setInterval(() => {
+      setSecondsAgo(Math.floor((Date.now() - lastUpdated) / 1000));
+    }, 1_000);
+    return () => clearInterval(id);
+  }, [lastUpdated]);
 
   const handlePreMatchPrediction = async (type: PredictionType) => {
     if (!type) return;
@@ -147,6 +203,7 @@ const T20WorldCupPage: React.FC = () => {
         setLiveResult(null);
       } else {
         setLiveResult(data);
+        setLastUpdated(Date.now());
         if (data.message) {
           setMessage(data.message);
         }
@@ -285,6 +342,19 @@ const T20WorldCupPage: React.FC = () => {
 
             {preMatchResult && !preMatchResult.error && (
               <Paper sx={{ mt: 2, p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>
+                {preMatchResult.prediction_stage && STAGE_LABELS[preMatchResult.prediction_stage] && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                    <Typography sx={{ color: palette.accent, fontSize: 12, fontStyle: 'italic' }}>
+                      {STAGE_LABELS[preMatchResult.prediction_stage]}
+                    </Typography>
+                    {preMatchResult.confidence != null && (
+                      <ConfidenceBadge
+                        confidence={preMatchResult.confidence}
+                        components={preMatchResult.features_used?.confidence_components}
+                      />
+                    )}
+                  </Box>
+                )}
                 <Typography sx={{ color: palette.muted, fontSize: 12 }}>
                   Pre-match output {preMatchType ? `- ${preMatchType}` : ''}
                 </Typography>
@@ -351,6 +421,24 @@ const T20WorldCupPage: React.FC = () => {
             {liveResult && !liveResult.error && (
               <Box sx={{ display: 'grid', gap: 2, mt: 2 }}>
                 <Divider sx={{ borderColor: palette.border }} />
+                {liveResult.prediction_stage && STAGE_LABELS[liveResult.prediction_stage] && (
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography sx={{ color: palette.accent, fontSize: 12, fontStyle: 'italic' }}>
+                      {STAGE_LABELS[liveResult.prediction_stage]}
+                    </Typography>
+                    {liveResult.confidence != null && (
+                      <ConfidenceBadge
+                        confidence={liveResult.confidence}
+                        components={liveResult.features_used?.confidence_components}
+                      />
+                    )}
+                  </Box>
+                )}
+                {lastUpdated && (
+                  <Typography sx={{ color: palette.muted, fontSize: 11, textAlign: 'right' }}>
+                    Updated {secondsAgo}s ago
+                  </Typography>
+                )}
 
                 {liveType === 'winner' && (
                   <Paper sx={{ p: 2, backgroundColor: '#0f172a', border: `1px solid ${palette.border}` }}>

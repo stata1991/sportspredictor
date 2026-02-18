@@ -6,7 +6,7 @@ import math
 import logging
 
 from backend.feature_store import build_series_features, SeriesFeatures, _band_for_target
-from backend.live_data_provider import fetch_live_data_for_series, get_match_details, UpstreamError
+from backend.live_data_provider import fetch_live_data_for_series, get_match_details, UpstreamError, reset_request_stats, get_request_stats
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +200,7 @@ def _resolve_priors(features: SeriesFeatures, venue: str) -> Tuple[str, float, f
 
 
 def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
+    reset_request_stats()
     match = _pick_match(series_id, date, match_number)
     if not match:
         raise MatchNotFound(f"No match found for date {date} and match_number {match_number}.")
@@ -216,6 +217,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
             "match": {"team1": team1, "team2": team2, "venue": venue, "date": date},
             "status": match.get("status"),
             "message": "Match already completed. Showing final status only.",
+            "request_stats": get_request_stats(),
         }
 
     if match_id:
@@ -228,6 +230,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
                     "match": {"team1": team1, "team2": team2, "venue": venue, "date": date},
                     "status": match.get("status"),
                     "message": "Match already started. Use Live tab for current predictions.",
+                    "request_stats": get_request_stats(),
                 }
 
     features = build_series_features(series_id)
@@ -353,10 +356,12 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
         "total_score": total_score_range,
         "wickets": wickets_range,
         "powerplay": powerplay_range,
+        "request_stats": get_request_stats(),
     }
 
 
 def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
+    reset_request_stats()
     match = _pick_match(series_id, date, match_number)
     if not match:
         raise MatchNotFound(f"No match found for date {date} and match_number {match_number}.")
@@ -475,6 +480,7 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
                     team2: _round_prob(win_probs[team2], fallback_level),
                 },
             },
+            "request_stats": get_request_stats(),
         }
 
     features = build_series_features(series_id)
@@ -621,7 +627,7 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
         form1 = features.team_form.get(team1)
         form2 = features.team_form.get(team2)
         if not form1 or not form2:
-            return {"error": "Insufficient data for winner prediction."}
+            return {"error": "Insufficient data for winner prediction.", "request_stats": get_request_stats()}
         total_rate = form1.win_rate + form2.win_rate
         if total_rate == 0:
             win_probs = {team1: 0.5, team2: 0.5}
@@ -706,4 +712,5 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
         "chase": chase_payload,
         "wickets": wickets_range,
         "powerplay": powerplay_range,
+        "request_stats": get_request_stats(),
     }

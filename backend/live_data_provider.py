@@ -1,5 +1,7 @@
 import os
 import requests
+import threading
+import time as _time_mod
 from datetime import datetime
 from dotenv import load_dotenv
 import logging
@@ -7,6 +9,32 @@ from backend.cache import cache
 from backend.config import SERIES_TTL, MATCH_INFO_TTL, OVERS_TTL, SCORECARD_TTL
 
 logger = logging.getLogger(__name__)
+
+# ── Per-request stats (thread-local) ──────────────────────────
+_request_stats = threading.local()
+
+
+def _inc_stat(name: str, amount: int = 1) -> None:
+    setattr(_request_stats, name, getattr(_request_stats, name, 0) + amount)
+
+
+def reset_request_stats() -> None:
+    _request_stats.cache_hits = 0
+    _request_stats.cache_misses = 0
+    _request_stats.upstream_calls = 0
+    _request_stats.upstream_latency_ms = 0
+    _request_stats.start_time = _time_mod.monotonic()
+
+
+def get_request_stats() -> dict:
+    elapsed = int((_time_mod.monotonic() - getattr(_request_stats, 'start_time', _time_mod.monotonic())) * 1000)
+    return {
+        "cache_hits": getattr(_request_stats, 'cache_hits', 0),
+        "cache_misses": getattr(_request_stats, 'cache_misses', 0),
+        "upstream_calls": getattr(_request_stats, 'upstream_calls', 0),
+        "upstream_latency_ms": getattr(_request_stats, 'upstream_latency_ms', 0),
+        "total_latency_ms": elapsed,
+    }
 
 
 class UpstreamError(Exception):
@@ -17,7 +45,12 @@ class UpstreamError(Exception):
 
 def _cached_get_json(url: str, headers: dict, cache_key: str, ttl: int):
     def loader():
+        _inc_stat('upstream_calls')
+        t0 = _time_mod.monotonic()
         response = requests.get(url, headers=headers)
+        latency = int((_time_mod.monotonic() - t0) * 1000)
+        _inc_stat('upstream_latency_ms', latency)
+        logger.info("Upstream call: %s latency=%dms status=%d", cache_key, latency, response.status_code)
         if response.status_code != 200:
             return {"_error": response.status_code, "_body": response.text}
         return response.json()
@@ -26,7 +59,9 @@ def _cached_get_json(url: str, headers: dict, cache_key: str, ttl: int):
     with lock:
         cached = cache.get(cache_key)
         if cached is not None:
+            _inc_stat('cache_hits')
             return cached
+        _inc_stat('cache_misses')
         data = loader()
         if not (isinstance(data, dict) and data.get("_error")):
             cache.set(cache_key, data, ttl)
@@ -35,13 +70,24 @@ def _cached_get_json(url: str, headers: dict, cache_key: str, ttl: int):
 
 def _stale_cached_get_json(url: str, headers: dict, cache_key: str, ttl: int, stale_ttl: int):
     """Fetch with stale-while-revalidate semantics for rarely-changing data like series info."""
+    was_miss = False
+
     def loader():
+        nonlocal was_miss
+        was_miss = True
+        _inc_stat('upstream_calls')
+        t0 = _time_mod.monotonic()
         response = requests.get(url, headers=headers)
+        latency = int((_time_mod.monotonic() - t0) * 1000)
+        _inc_stat('upstream_latency_ms', latency)
+        logger.info("Upstream call (stale): %s latency=%dms status=%d", cache_key, latency, response.status_code)
         if response.status_code != 200:
             raise UpstreamError(response.status_code, response.text)
         return response.json()
 
-    return cache.stale_while_revalidate(cache_key, ttl, stale_ttl, loader)
+    result = cache.stale_while_revalidate(cache_key, ttl, stale_ttl, loader)
+    _inc_stat('cache_hits' if not was_miss else 'cache_misses')
+    return result
 
 
 ENV_PATH = os.path.join(os.path.dirname(__file__), ".env")
