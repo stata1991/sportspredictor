@@ -168,7 +168,6 @@ const T20WorldCupPage: React.FC = () => {
           params: { series_id: SERIES_ID, date: dateStrRef.current, match_number: matchNumberRef.current },
         });
         const data: LiveResponse = res.data;
-        console.log('[T20WC Poll] decision_moment:', data.decision_moment);
         if (!data.error) {
           setLiveResult(data);
           setLastUpdated(Date.now());
@@ -210,34 +209,37 @@ const T20WorldCupPage: React.FC = () => {
       } else {
         setPreMatchResult(data);
 
-        // Track winner prediction accuracy
-        if (type === 'winner' && data.match) {
+        // Resolve accuracy for completed matches regardless of prediction type
+        if (data.match && data.prediction_stage === 'completed' && data.actual_winner) {
           const matchLabel = `${data.match.team1} vs ${data.match.team2}`;
           const records = loadAccuracyRecords();
           const idx = records.findIndex(r => r.date === dateStr && r.match_label === matchLabel);
-
-          if (data.prediction_stage === 'completed' && data.actual_winner) {
-            if (idx >= 0) {
-              records[idx].actual_winner = data.actual_winner;
-              records[idx].correct = records[idx].predicted_winner === data.actual_winner;
-              saveAccuracyRecords(records);
-              setAccuracyRecords([...records]);
-            }
-          } else if (data.winner?.team && data.prediction_stage !== 'completed') {
-            if (idx >= 0) {
-              records[idx].predicted_winner = data.winner.team;
-            } else {
-              records.push({
-                date: dateStr,
-                match_label: matchLabel,
-                predicted_winner: data.winner.team,
-                actual_winner: null,
-                correct: null,
-              });
-            }
+          if (idx >= 0) {
+            records[idx].actual_winner = data.actual_winner;
+            records[idx].correct = records[idx].predicted_winner === data.actual_winner;
             saveAccuracyRecords(records);
             setAccuracyRecords([...records]);
           }
+        }
+
+        // Store new winner predictions for pre-match stages
+        if (type === 'winner' && data.match && data.winner?.team && data.prediction_stage !== 'completed' && data.prediction_stage !== 'in_progress') {
+          const matchLabel = `${data.match.team1} vs ${data.match.team2}`;
+          const records = loadAccuracyRecords();
+          const idx = records.findIndex(r => r.date === dateStr && r.match_label === matchLabel);
+          if (idx >= 0) {
+            records[idx].predicted_winner = data.winner.team;
+          } else {
+            records.push({
+              date: dateStr,
+              match_label: matchLabel,
+              predicted_winner: data.winner.team,
+              actual_winner: null,
+              correct: null,
+            });
+          }
+          saveAccuracyRecords(records);
+          setAccuracyRecords([...records]);
         }
       }
     } catch (err: unknown) {
@@ -259,8 +261,6 @@ const T20WorldCupPage: React.FC = () => {
         params: { series_id: SERIES_ID, date: dateStr, match_number: matchNumber },
       });
       const data: LiveResponse = res.data;
-      console.log('[T20WC Live] full API response:', JSON.stringify(data, null, 2));
-      console.log('[T20WC Live] decision_moment:', data.decision_moment);
       if (data.error) {
         setMessage(data.error);
         setLiveResult(null);
@@ -427,6 +427,19 @@ const T20WorldCupPage: React.FC = () => {
                   {preMatchResult.message && (
                     <Typography>{preMatchResult.message}</Typography>
                   )}
+                  {preMatchResult.prediction_stage === 'in_progress' && preMatchResult.match && (() => {
+                    const matchLabel = `${preMatchResult.match.team1} vs ${preMatchResult.match.team2}`;
+                    const existing = accuracyRecords.find(r => r.date === dateStr && r.match_label === matchLabel);
+                    if (!existing) return null;
+                    return (
+                      <Typography sx={{ color: palette.muted, fontSize: 13, mt: 1 }}>
+                        Your earlier pick: <strong style={{ color: palette.primary }}>{existing.predicted_winner}</strong>
+                        {existing.actual_winner
+                          ? ` — ${existing.correct ? 'Correct' : 'Wrong'} (${existing.actual_winner} won)`
+                          : ' — result pending'}
+                      </Typography>
+                    );
+                  })()}
                   {preMatchType === 'winner' && !preMatchResult.message && preMatchResult.winner?.probabilities && (() => {
                     const probs = preMatchResult.winner.probabilities;
                     const sorted = Object.entries(probs).sort((a, b) => b[1] - a[1]);
