@@ -469,6 +469,14 @@ def live_predictions(series_id: int, date: str, match_number: int = 0) -> Dict:
     if not innings:
         pre_match = pre_match_predictions(series_id=series_id, date=date, match_number=match_number)
         pre_match["message"] = "Match has not started yet. Showing pre-match prediction."
+        team1 = match["team1"]["teamName"]
+        team2 = match["team2"]["teamName"]
+        pre_match.setdefault("decision_moment", {
+            "moment_type": "MATCH_SITUATION",
+            "headline": f"{team1} vs {team2} — match yet to begin",
+            "detail": "Pre-match prediction based on historical data.",
+            "urgency": "low",
+        })
         return pre_match
 
     current_innings = max(innings, key=lambda x: x.get("inningsId", 0))

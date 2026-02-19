@@ -168,6 +168,7 @@ const T20WorldCupPage: React.FC = () => {
           params: { series_id: SERIES_ID, date: dateStrRef.current, match_number: matchNumberRef.current },
         });
         const data: LiveResponse = res.data;
+        console.log('[T20WC Poll] decision_moment:', data.decision_moment);
         if (!data.error) {
           setLiveResult(data);
           setLastUpdated(Date.now());
@@ -258,6 +259,8 @@ const T20WorldCupPage: React.FC = () => {
         params: { series_id: SERIES_ID, date: dateStr, match_number: matchNumber },
       });
       const data: LiveResponse = res.data;
+      console.log('[T20WC Live] full API response:', JSON.stringify(data, null, 2));
+      console.log('[T20WC Live] decision_moment:', data.decision_moment);
       if (data.error) {
         setMessage(data.error);
         setLiveResult(null);
