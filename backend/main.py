@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -44,6 +44,7 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 IPL_SERIES_ID = int(os.getenv("IPL_SERIES_ID", "9237"))
 
 app = FastAPI(title="Cricket Prediction API", version="2.0")
+router = APIRouter(prefix="/api")
 
 app.add_middleware(CorrelationIdMiddleware)
 app.add_middleware(
@@ -130,7 +131,7 @@ def _match_info_from_series(series_id: int, date: str, match_number: int):
     }
 
 
-@app.post("/update-match-context")
+@router.post("/update-match-context")
 def update_match_context_endpoint(date: str = datetime.utcnow().strftime("%Y-%m-%d"), match_number: int = 0):
     if match_number < 0:
         raise HTTPException(status_code=422, detail="match_number must be >= 0")
@@ -154,7 +155,7 @@ def update_match_context_endpoint(date: str = datetime.utcnow().strftime("%Y-%m-
     }
 
 
-@app.post("/t20wc/update-match-context")
+@router.post("/t20wc/update-match-context")
 def update_t20wc_match_context(date: str = datetime.utcnow().strftime("%Y-%m-%d"), match_number: int = 0):
     if not T20WC_SERIES_ID:
         raise HTTPException(status_code=500, detail="T20WC_SERIES_ID is not configured.")
@@ -180,7 +181,7 @@ def update_t20wc_match_context(date: str = datetime.utcnow().strftime("%Y-%m-%d"
     }
 
 
-@app.get("/matches")
+@router.get("/matches")
 def list_matches(request: Request, date: str):
     try:
         matches = fetch_live_data_for_series(date, IPL_SERIES_ID)
@@ -201,7 +202,7 @@ def list_matches(request: Request, date: str):
     return _etag_response(request, data)
 
 
-@app.get("/t20wc/matches")
+@router.get("/t20wc/matches")
 def list_t20wc_matches(request: Request, date: str):
     if not T20WC_SERIES_ID:
         raise HTTPException(status_code=500, detail="T20WC_SERIES_ID is not configured.")
@@ -224,17 +225,17 @@ def list_t20wc_matches(request: Request, date: str):
     return _etag_response(request, data)
 
 
-@app.get("/predict/pre-match")
+@router.get("/predict/pre-match")
 def predict_pre_match(series_id: int, date: str, match_number: int = 0):
     return _safe_pre_match(series_id=series_id, date=date, match_number=match_number)
 
 
-@app.get("/predict/live")
+@router.get("/predict/live")
 def predict_live(series_id: int, date: str, match_number: int = 0):
     return _safe_live(series_id=series_id, date=date, match_number=match_number)
 
 
-@app.get("/predict/winner")
+@router.get("/predict/winner")
 def predict_winner(date: str, match_number: int = 0):
     payload = _safe_pre_match(series_id=IPL_SERIES_ID, date=date, match_number=match_number)
     payload["deprecated"] = True
@@ -242,7 +243,7 @@ def predict_winner(date: str, match_number: int = 0):
     return payload
 
 
-@app.get("/predict/score")
+@router.get("/predict/score")
 def predict_score_range(date: str, match_number: int = 0):
     payload = _safe_pre_match(series_id=IPL_SERIES_ID, date=date, match_number=match_number)
     payload["deprecated"] = True
@@ -250,7 +251,7 @@ def predict_score_range(date: str, match_number: int = 0):
     return payload
 
 
-@app.get("/predict/wickets")
+@router.get("/predict/wickets")
 def predict_wickets_range(date: str, match_number: int = 0):
     payload = _safe_pre_match(series_id=IPL_SERIES_ID, date=date, match_number=match_number)
     payload["deprecated"] = True
@@ -258,7 +259,7 @@ def predict_wickets_range(date: str, match_number: int = 0):
     return payload
 
 
-@app.get("/predict/powerplay")
+@router.get("/predict/powerplay")
 def predict_powerplay_range(date: str, match_number: int = 0):
     payload = _safe_pre_match(series_id=IPL_SERIES_ID, date=date, match_number=match_number)
     payload["deprecated"] = True
@@ -266,7 +267,7 @@ def predict_powerplay_range(date: str, match_number: int = 0):
     return payload
 
 
-@app.get("/t20wc/predict/winner")
+@router.get("/t20wc/predict/winner")
 def predict_t20wc_winner(date: str, match_number: int = 0):
     if not T20WC_SERIES_ID:
         raise HTTPException(status_code=500, detail="T20WC_SERIES_ID is not configured.")
@@ -276,7 +277,7 @@ def predict_t20wc_winner(date: str, match_number: int = 0):
     return payload
 
 
-@app.get("/t20wc/predict/score")
+@router.get("/t20wc/predict/score")
 def predict_t20wc_score(date: str, match_number: int = 0):
     if not T20WC_SERIES_ID:
         raise HTTPException(status_code=500, detail="T20WC_SERIES_ID is not configured.")
@@ -286,7 +287,7 @@ def predict_t20wc_score(date: str, match_number: int = 0):
     return payload
 
 
-@app.get("/t20wc/predict/wickets")
+@router.get("/t20wc/predict/wickets")
 def predict_t20wc_wickets(date: str, match_number: int = 0):
     if not T20WC_SERIES_ID:
         raise HTTPException(status_code=500, detail="T20WC_SERIES_ID is not configured.")
@@ -296,7 +297,7 @@ def predict_t20wc_wickets(date: str, match_number: int = 0):
     return payload
 
 
-@app.get("/t20wc/predict/powerplay")
+@router.get("/t20wc/predict/powerplay")
 def predict_t20wc_powerplay(date: str, match_number: int = 0):
     if not T20WC_SERIES_ID:
         raise HTTPException(status_code=500, detail="T20WC_SERIES_ID is not configured.")
@@ -306,7 +307,7 @@ def predict_t20wc_powerplay(date: str, match_number: int = 0):
     return payload
 
 
-@app.get("/t20wc/predict/live")
+@router.get("/t20wc/predict/live")
 def predict_t20wc_live(date: str, match_number: int = 0):
     if not T20WC_SERIES_ID:
         raise HTTPException(status_code=500, detail="T20WC_SERIES_ID is not configured.")
@@ -314,3 +315,11 @@ def predict_t20wc_live(date: str, match_number: int = 0):
     payload["deprecated"] = True
     payload["use"] = "/predict/live"
     return payload
+
+
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
+
+
+app.include_router(router)
