@@ -1,0 +1,8 @@
+frontend/
+.git/
+.idea/
+__pycache__/
+*.pyc
+.env
+*.csv
+node_modules/
