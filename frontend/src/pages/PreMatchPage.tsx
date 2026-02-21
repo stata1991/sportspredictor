@@ -22,6 +22,7 @@ type PreMatchResponse = {
   batting_context?: string;
   match?: { team1: string; team2: string; venue: string; date: string };
   winner?: { probabilities: Record<string, number> };
+  winner_reasoning?: string[];
   total_score?: { low: number; high: number };
   wickets?: { low: number; high: number };
   powerplay?: { low: number; high: number };
@@ -279,6 +280,18 @@ const PreMatchPage: React.FC = () => {
                         .map(([team, p]) => `${team} ${Math.round(p * 100)}%`)
                         .join(' \u00B7 ')
                     : 'Winner prediction pending.'}
+                  {result.winner_reasoning && result.winner_reasoning.length > 0 && (
+                    <Box sx={{ mt: 1.5 }}>
+                      <Typography sx={{ color: '#94a3b8', fontSize: '0.75rem', mb: 0.5 }}>
+                        Based on:
+                      </Typography>
+                      {result.winner_reasoning.map((r, i) => (
+                        <Typography key={i} sx={{ color: '#94a3b8', fontSize: '0.75rem', pl: 1 }}>
+                          &bull; {r}
+                        </Typography>
+                      ))}
+                    </Box>
+                  )}
                 </>
               )}
               {activeType === 'score' && (

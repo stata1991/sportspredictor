@@ -406,6 +406,38 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
     else:
         batting_context = "1st innings estimate \u00B7 either team batting"
 
+    # Build winner_reasoning from blend data
+    winner_reasoning = []
+    ss = winner_blend.get("strength_signal", 0.5)
+    if ss > 0.60:
+        winner_reasoning.append(f"{team1} ranked significantly higher by ICC")
+    elif ss > 0.52:
+        winner_reasoning.append(f"{team1} holds a slight ICC ranking edge")
+    else:
+        winner_reasoning.append("Teams evenly matched by ICC rankings")
+
+    t1m = winner_blend.get("team1_matches", 0)
+    t2m = winner_blend.get("team2_matches", 0)
+    if t1m + t2m >= 2:
+        if winner_blend.get("series_weight", 0) > 0.3:
+            f1_wins = form1.wins if form1 else 0
+            f1_losses = (form1.played - form1.wins) if form1 else 0
+            f2_wins = form2.wins if form2 else 0
+            f2_losses = (form2.played - form2.wins) if form2 else 0
+            winner_reasoning.append(
+                f"{team1} {f1_wins}-{f1_losses} in this tournament vs {team2} {f2_wins}-{f2_losses}"
+            )
+        else:
+            winner_reasoning.append("Limited series data \u2014 ranking-based estimate")
+
+    if toss_adjustment:
+        td = (toss_adjustment.get("toss_decision") or "").lower()
+        tw = toss_adjustment.get("toss_winner", "")
+        if td in ("bat", "batting"):
+            winner_reasoning.append(f"{tw} elected to bat \u2014 slight edge to batting first here")
+        else:
+            winner_reasoning.append(f"{tw} chose to field \u2014 chasing favored at this venue")
+
     return {
         "prediction_stage": prediction_stage,
         "batting_context": batting_context,
@@ -444,6 +476,7 @@ def pre_match_predictions(series_id: int, date: str, match_number: int = 0) -> D
                 team2: _round_prob(win_probs[team2], fallback_level),
             },
         },
+        "winner_reasoning": winner_reasoning,
         "total_score": total_score_range,
         "wickets": wickets_range,
         "powerplay": powerplay_range,

@@ -27,6 +27,7 @@ type PreMatchResponse = {
   uncertainty?: string;
   match?: { team1: string; team2: string; venue: string; date: string };
   winner?: { team?: string; probability?: number; probabilities?: Record<string, number> };
+  winner_reasoning?: string[];
   total_score?: { low: number; mid: number; high: number };
   wickets?: { low: number; mid: number; high: number };
   powerplay?: { low: number; mid: number; high: number };
@@ -444,9 +445,23 @@ const T20WorldCupPage: React.FC = () => {
                     const probs = preMatchResult.winner.probabilities;
                     const sorted = Object.entries(probs).sort((a, b) => b[1] - a[1]);
                     return (
-                      <Typography sx={{ fontWeight: 700, fontSize: 18 }}>
-                        {sorted.map(([team, p]) => `${team} ${Math.round(p * 100)}%`).join(' \u00B7 ')}
-                      </Typography>
+                      <>
+                        <Typography sx={{ fontWeight: 700, fontSize: 18 }}>
+                          {sorted.map(([team, p]) => `${team} ${Math.round(p * 100)}%`).join(' \u00B7 ')}
+                        </Typography>
+                        {preMatchResult.winner_reasoning && preMatchResult.winner_reasoning.length > 0 && (
+                          <Box sx={{ mt: 1 }}>
+                            <Typography sx={{ color: palette.muted, fontSize: 11 }}>
+                              Based on:
+                            </Typography>
+                            {preMatchResult.winner_reasoning.map((r, i) => (
+                              <Typography key={i} sx={{ color: palette.muted, fontSize: 11, pl: 1 }}>
+                                &bull; {r}
+                              </Typography>
+                            ))}
+                          </Box>
+                        )}
+                      </>
                     );
                   })()}
                   {preMatchType === 'score' && preMatchResult.total_score && (
