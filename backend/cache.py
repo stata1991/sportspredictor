@@ -1,3 +1,4 @@
+import collections
 import json
 import threading
 import time
@@ -8,7 +9,7 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     redis = None
 
-from backend.config import CACHE_ENABLED, CACHE_NAMESPACE, CACHE_VERSION, REDIS_URL
+from backend.config import CACHE_ENABLED, CACHE_MAX_SIZE, CACHE_NAMESPACE, CACHE_VERSION, REDIS_URL
 
 
 def _now() -> float:
@@ -16,8 +17,9 @@ def _now() -> float:
 
 
 class _MemoryCache:
-    def __init__(self) -> None:
-        self._data: dict[str, tuple[float, Any]] = {}
+    def __init__(self, max_size: int = CACHE_MAX_SIZE) -> None:
+        self._data: collections.OrderedDict[str, tuple[float, Any]] = collections.OrderedDict()
+        self._max_size = max_size
         self._lock = threading.Lock()
 
     def get(self, key: str) -> Optional[Any]:
@@ -29,12 +31,17 @@ class _MemoryCache:
             if expires_at and expires_at < _now():
                 self._data.pop(key, None)
                 return None
+            self._data.move_to_end(key)
             return value
 
     def set(self, key: str, value: Any, ttl: int) -> None:
         expires_at = _now() + ttl if ttl else 0
         with self._lock:
+            if key in self._data:
+                self._data.move_to_end(key)
             self._data[key] = (expires_at, value)
+            while len(self._data) > self._max_size:
+                self._data.popitem(last=False)
 
     def delete(self, key: str) -> None:
         with self._lock:

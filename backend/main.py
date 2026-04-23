@@ -43,7 +43,11 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 
 IPL_SERIES_ID = int(os.getenv("IPL_SERIES_ID", "9237"))
 
-app = FastAPI(title="Cricket Prediction API", version="2.0")
+app = FastAPI(
+    title="FantasyFuel API",
+    description="Multi-sport prediction platform",
+    version="0.2.0",
+)
 router = APIRouter(prefix="/api")
 
 app.add_middleware(CorrelationIdMiddleware)
