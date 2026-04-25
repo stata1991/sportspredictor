@@ -10,6 +10,7 @@ import uuid
 import logging
 import contextvars
 
+from backend.football.routes import router as football_router
 from backend.prediction_engine_api import pre_match_predictions, live_predictions, MatchNotFound
 from backend.live_data_provider import (
     fetch_live_data_for_series,
@@ -327,3 +328,4 @@ def health_check():
 
 
 app.include_router(router)
+app.include_router(football_router, prefix="/api/football", tags=["football"])

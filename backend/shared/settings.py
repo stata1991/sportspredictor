@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     )
 
     database_url: str
+    api_football_key: str | None = None
     rapidapi_key: str | None = None
     anthropic_api_key: str | None = None
     cricketdata_api_key: str | None = None
