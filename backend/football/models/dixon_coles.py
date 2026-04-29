@@ -49,6 +49,27 @@ DEFAULT_XI = 0.0065
 # Maximum goals in the scoreline probability matrix.
 MAX_GOALS = 8
 
+# Bayesian shrinkage: teams with fewer than prior_strength matches are
+# pulled toward the population mean.  A team needs ~30+ matches before
+# its raw rating is trusted >75%.
+DEFAULT_PRIOR_STRENGTH = 10
+
+
+def _shrink_rating(
+    raw: float,
+    n_matches: int,
+    prior_mean: float,
+    prior_strength: float,
+) -> float:
+    """Bayesian shrinkage toward the population mean.
+
+    ``weight = n / (n + prior_strength)`` so a team with *n* matches
+    keeps ``weight`` of its raw MLE rating and ``1 - weight`` reverts
+    to the prior (population mean).
+    """
+    weight = n_matches / (n_matches + prior_strength)
+    return weight * raw + (1.0 - weight) * prior_mean
+
 
 # ── Dixon-Coles tau correction ─────────────────────────────────────
 
@@ -216,9 +237,40 @@ class DixonColesModel:
         training_matches: int,
         training_window: str,
         team_names: dict[int, str] | None = None,
+        match_counts: dict[int, int] | None = None,
+        prior_strength: float = DEFAULT_PRIOR_STRENGTH,
     ) -> None:
-        self.attack = attack
-        self.defence = defence
+        # Store raw (unshrunk) MLE ratings for serialisation.
+        self._raw_attack = dict(attack)
+        self._raw_defence = dict(defence)
+        self.match_counts = match_counts
+        self.prior_strength = prior_strength
+
+        # Apply Bayesian shrinkage when match counts are available.
+        if match_counts is not None and prior_strength > 0:
+            attack_mean = float(np.mean(list(attack.values())))
+            defence_mean = float(np.mean(list(defence.values())))
+            self.attack = {
+                tid: _shrink_rating(
+                    v, match_counts.get(tid, 0), attack_mean, prior_strength,
+                )
+                for tid, v in attack.items()
+            }
+            self.defence = {
+                tid: _shrink_rating(
+                    v, match_counts.get(tid, 0), defence_mean, prior_strength,
+                )
+                for tid, v in defence.items()
+            }
+            logger.info(
+                "Applied Bayesian shrinkage (prior_strength=%g, "
+                "attack_prior=%.4f, defence_prior=%.4f)",
+                prior_strength, attack_mean, defence_mean,
+            )
+        else:
+            self.attack = dict(attack)
+            self.defence = dict(defence)
+
         self.gamma = gamma
         self.rho = rho
         self.xi = xi
@@ -227,15 +279,25 @@ class DixonColesModel:
         self.team_names = team_names or {}
 
         # Precompute median ratings for unseen-team fallback.
-        self._median_attack = float(np.median(list(attack.values())))
-        self._median_defence = float(np.median(list(defence.values())))
+        self._median_attack = float(np.median(list(self.attack.values())))
+        self._median_defence = float(np.median(list(self.defence.values())))
 
     def _get_ratings(
         self, team_id: int,
     ) -> tuple[float, float, bool]:
-        """Return (attack, defence, is_unseen) for a team."""
+        """Return (attack, defence, low_data) for a team.
+
+        ``low_data`` is True when the team is unseen OR when it has
+        fewer than ``prior_strength`` training matches (meaning its
+        effective rating is dominated by the population prior).
+        """
         if team_id in self.attack:
-            return self.attack[team_id], self.defence[team_id], False
+            low_data = False
+            if self.match_counts is not None:
+                low_data = (
+                    self.match_counts.get(team_id, 0) < self.prior_strength
+                )
+            return self.attack[team_id], self.defence[team_id], low_data
         logger.warning(
             "Unseen team %d — using median fallback ratings", team_id,
         )
@@ -298,14 +360,18 @@ class DixonColesModel:
     # ── Serialisation ──────────────────────────────────────────────
 
     def save(self, path: str | Path) -> None:
-        """Write model parameters to JSON."""
+        """Write model parameters to JSON.
+
+        Always saves **raw** (unshrunk) ratings so the model can be
+        re-loaded with a different ``prior_strength`` without retraining.
+        """
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        data = {
+        data: dict[str, Any] = {
             "model": "dixon_coles",
             "version": 1,
-            "attack": {str(k): v for k, v in self.attack.items()},
-            "defence": {str(k): v for k, v in self.defence.items()},
+            "attack": {str(k): v for k, v in self._raw_attack.items()},
+            "defence": {str(k): v for k, v in self._raw_defence.items()},
             "gamma": self.gamma,
             "rho": self.rho,
             "xi": self.xi,
@@ -314,15 +380,35 @@ class DixonColesModel:
             "team_names": {str(k): v for k, v in self.team_names.items()},
             "saved_at": datetime.now(timezone.utc).isoformat(),
         }
+        if self.match_counts is not None:
+            data["match_counts"] = {
+                str(k): v for k, v in self.match_counts.items()
+            }
+            data["prior_strength"] = self.prior_strength
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
         logger.info("Model saved to %s (%d teams)", path, len(self.attack))
 
     @classmethod
-    def load(cls, path: str | Path) -> DixonColesModel:
-        """Load model parameters from JSON."""
+    def load(
+        cls,
+        path: str | Path,
+        prior_strength: float = DEFAULT_PRIOR_STRENGTH,
+    ) -> DixonColesModel:
+        """Load model parameters from JSON.
+
+        If the JSON contains ``match_counts``, Bayesian shrinkage is
+        applied at construction time using *prior_strength*.  Pass
+        ``prior_strength=0`` to disable shrinkage and use raw MLE
+        ratings.
+        """
         with open(path) as f:
             data = json.load(f)
+        match_counts = None
+        if "match_counts" in data:
+            match_counts = {
+                int(k): v for k, v in data["match_counts"].items()
+            }
         return cls(
             attack={int(k): v for k, v in data["attack"].items()},
             defence={int(k): v for k, v in data["defence"].items()},
@@ -332,6 +418,8 @@ class DixonColesModel:
             training_matches=data["training_matches"],
             training_window=data["training_window"],
             team_names={int(k): v for k, v in data.get("team_names", {}).items()},
+            match_counts=match_counts,
+            prior_strength=prior_strength,
         )
 
 
@@ -439,6 +527,13 @@ def train(
             if tid not in team_names:
                 team_names[tid] = name
 
+    # Compute per-team match counts (home + away appearances).
+    home_counts = df["home_team_id"].value_counts()
+    away_counts = df["away_team_id"].value_counts()
+    match_counts = (
+        home_counts.add(away_counts, fill_value=0).astype(int).to_dict()
+    )
+
     # Training window string.
     min_date = df["kickoff_utc"].min()
     window = f"{min_date.date()} to {max_date.date()}"
@@ -452,6 +547,7 @@ def train(
         training_matches=len(df),
         training_window=window,
         team_names=team_names,
+        match_counts=match_counts,
     )
 
     logger.info(

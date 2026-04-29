@@ -73,8 +73,8 @@ class Outcome(Base):
     away_team: Mapped[str] = mapped_column(Text, nullable=False)
     ft_home: Mapped[int] = mapped_column(Integer, nullable=False)
     ft_away: Mapped[int] = mapped_column(Integer, nullable=False)
-    ht_home: Mapped[int] = mapped_column(Integer, nullable=False)
-    ht_away: Mapped[int] = mapped_column(Integer, nullable=False)
+    ht_home: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ht_away: Mapped[int | None] = mapped_column(Integer, nullable=True)
     first_scorer_team: Mapped[str | None] = mapped_column(Text, nullable=True)
     kickoff_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False
