@@ -26,3 +26,10 @@ node_modules/
 .elasticbeanstalk/*
 !.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml
+
+# Football historical data (dev artifacts, reproducible via CLI)
+backend/football/historical/raw/
+backend/football/historical/data/
+
+# Evaluation output (plots, intermediate results)
+backend/football/evaluation/output/
