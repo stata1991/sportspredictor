@@ -7,6 +7,7 @@ from collections.abc import AsyncGenerator
 from fastapi import HTTPException
 
 from backend.cache import cache as _cache_singleton
+from backend.football.agent.client import AnthropicAgentClient
 from backend.football.data_provider import APIFootballClient
 from backend.shared.async_singleflight import AsyncSingleflight
 from backend.shared.settings import get_settings
@@ -30,3 +31,15 @@ async def get_football_client() -> AsyncGenerator[APIFootballClient, None]:
         settings.api_football_key, _cache_singleton, _singleflight
     ) as client:
         yield client
+
+
+def get_agent_client() -> AnthropicAgentClient | None:
+    """Provide an ``AnthropicAgentClient``, or ``None`` if unconfigured.
+
+    Unlike ``get_football_client``, this does NOT raise — reasoning is
+    optional.  Routes check for None and skip reasoning gracefully.
+    """
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        return None
+    return AnthropicAgentClient(api_key=settings.anthropic_api_key)

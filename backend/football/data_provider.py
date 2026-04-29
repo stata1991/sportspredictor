@@ -495,6 +495,36 @@ class APIFootballClient:
             return None
         return AFPrediction.model_validate(items[0])
 
+    async def get_head_to_head(
+        self,
+        home_team_id: int,
+        away_team_id: int,
+        last: int = 10,
+    ) -> list[AFFixture]:
+        """Head-to-head fixtures between two teams."""
+        h2h_str = f"{home_team_id}-{away_team_id}"
+        items = await self._request(
+            "/fixtures/headtohead",
+            {"h2h": h2h_str, "last": last},
+            cache_method="headtohead",
+            ttl=ENDPOINT_TTLS["headtohead"],
+        )
+        return [AFFixture.model_validate(item) for item in items]
+
+    async def get_team_last_fixtures(
+        self,
+        team_id: int,
+        last: int = 5,
+    ) -> list[AFFixture]:
+        """Last N fixtures for a team (any league)."""
+        items = await self._request(
+            "/fixtures",
+            {"team": team_id, "last": last},
+            cache_method="team_last_fixtures",
+            ttl=ENDPOINT_TTLS["team_last_fixtures"],
+        )
+        return [AFFixture.model_validate(item) for item in items]
+
     async def get_teams_for_league(
         self,
         league: int = WC_LEAGUE_ID,

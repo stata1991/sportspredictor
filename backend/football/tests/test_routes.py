@@ -108,12 +108,16 @@ class TestPredictPreMatch:
         async def _override_session():
             return self.mock_session
 
+        def _override_agent():
+            return None  # No agent by default in existing tests.
+
         _app.dependency_overrides.clear()
-        from backend.football.deps import get_football_client
+        from backend.football.deps import get_agent_client, get_football_client
         from backend.shared.db import get_session
 
         _app.dependency_overrides[get_football_client] = _override_client
         _app.dependency_overrides[get_session] = _override_session
+        _app.dependency_overrides[get_agent_client] = _override_agent
 
         yield
         _app.dependency_overrides.clear()
@@ -197,10 +201,16 @@ class TestPredictPreMatch:
         assert body["cached"] is False
         assert body["stage"] == "pre_lineup"
         assert "predictions" in body
+        # No agent configured → reasoning and upset are null.
+        assert body["reasoning"] is None
+        assert body["upset"] is None
         mock_save.assert_awaited_once()
 
+    @patch("backend.football.routes.get_cached_reasoning")
     @patch("backend.football.routes.get_cached_bundle")
-    async def test_returns_cached_when_fresh(self, mock_cache_fn):
+    async def test_returns_cached_when_fresh(
+        self, mock_cache_fn, mock_cache_reasoning_fn
+    ):
         fx = _make_fixture()
         self.mock_client.get_fixture = AsyncMock(return_value=fx)
         self.mock_client.get_lineups = AsyncMock(return_value=[])
@@ -209,6 +219,7 @@ class TestPredictPreMatch:
             t: _make_prediction_row(prediction_type=t)
             for t in ("winner", "total_goals", "ht_score", "first_to_score")
         }
+        mock_cache_reasoning_fn.return_value = None
 
         async with AsyncClient(
             transport=ASGITransport(app=_app), base_url="http://test"
@@ -488,3 +499,332 @@ class TestAccuracy:
         assert len(body["rollups"]) == 1
         assert body["rollups"][0]["window"] == "last_7d"
         assert body["rollups"][0]["total_predictions"] == 10
+
+
+# ── Reasoning wiring tests ──────────────────────────────────────────
+
+
+class TestPredictPreMatchWithReasoning:
+    """Tests for reasoning + upset integration in predict_pre_match."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_deps(self):
+        self.mock_client = AsyncMock()
+        self.mock_session = AsyncMock()
+        self.mock_session.commit = AsyncMock()
+        self.mock_agent = MagicMock()
+
+        async def _override_client():
+            return self.mock_client
+
+        async def _override_session():
+            return self.mock_session
+
+        def _override_agent():
+            return self.mock_agent
+
+        _app.dependency_overrides.clear()
+        from backend.football.deps import get_agent_client, get_football_client
+        from backend.shared.db import get_session
+
+        _app.dependency_overrides[get_football_client] = _override_client
+        _app.dependency_overrides[get_session] = _override_session
+        _app.dependency_overrides[get_agent_client] = _override_agent
+
+        yield
+        _app.dependency_overrides.clear()
+
+    def _setup_fresh_prediction(self, mock_engine_fn, mock_cache_fn):
+        """Common setup for fresh prediction tests."""
+        fx = _make_fixture()
+        self.mock_client.get_fixture = AsyncMock(return_value=fx)
+        self.mock_client.get_lineups = AsyncMock(return_value=[])
+        mock_cache_fn.return_value = None
+
+        mock_engine = MagicMock()
+        mock_bundle = MagicMock()
+        mock_bundle.stage.value = "pre_lineup"
+        mock_bundle.model_version = "dixon_coles_v1"
+        mock_bundle.confidence = "normal"
+        mock_bundle.winner.model_dump.return_value = {"p_home_win": 0.4}
+        mock_bundle.total_goals.model_dump.return_value = {"over_2_5": 0.5}
+        mock_bundle.ht_score.model_dump.return_value = {"p_draw": 0.3}
+        mock_bundle.first_to_score.model_dump.return_value = {
+            "p_home_first": 0.5
+        }
+        mock_engine.predict.return_value = mock_bundle
+        mock_engine_fn.return_value = mock_engine
+        return mock_bundle
+
+    @patch("backend.football.routes.compute_upset_index")
+    @patch("backend.football.routes.generate_reasoning")
+    @patch("backend.football.routes.save_upset_output")
+    @patch("backend.football.routes.save_reasoning_output")
+    @patch("backend.football.routes.save_prediction_bundle")
+    @patch("backend.football.routes.get_cached_reasoning")
+    @patch("backend.football.routes.get_cached_bundle")
+    @patch("backend.football.routes._get_engine")
+    async def test_reasoning_generated_on_fresh_prediction(
+        self,
+        mock_engine_fn,
+        mock_cache_fn,
+        mock_cache_reasoning_fn,
+        mock_save_bundle,
+        mock_save_reasoning,
+        mock_save_upset,
+        mock_gen_reasoning,
+        mock_compute_upset,
+    ):
+        self._setup_fresh_prediction(mock_engine_fn, mock_cache_fn)
+        mock_save_bundle.return_value = []
+        mock_cache_reasoning_fn.return_value = None
+
+        # Mock reasoning output.
+        mock_reasoning = MagicMock()
+        mock_reasoning.paragraphs = ["P1.", "P2.", "P3."]
+        mock_reasoning.claims = []
+        mock_reasoning.upset_index = 0.40
+        mock_reasoning.upset_signals = []
+        mock_reasoning.upset_paths = []
+        mock_reasoning.validation_status = "valid"
+        mock_gen_reasoning.return_value = mock_reasoning
+
+        # Mock upset output.
+        mock_upset = MagicMock()
+        mock_upset.upset_index = 0.28
+        mock_upset.deterministic_component = 0.22
+        mock_upset.agent_component = 0.40
+        mock_upset.bounded_agent = 0.37
+        mock_upset.upset_signals = []
+        mock_upset.upset_paths = []
+        mock_compute_upset.return_value = mock_upset
+
+        mock_save_reasoning.return_value = MagicMock()
+        mock_save_upset.return_value = MagicMock()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/pre-match/100")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["reasoning"] is not None
+        assert body["reasoning"]["paragraphs"] == ["P1.", "P2.", "P3."]
+        assert body["reasoning"]["validation_status"] == "valid"
+        assert body["upset"] is not None
+        assert body["upset"]["upset_index"] == 0.28
+        mock_save_reasoning.assert_awaited_once()
+        mock_save_upset.assert_awaited_once()
+        # Two commits: one for deterministic, one for reasoning+upset.
+        assert self.mock_session.commit.await_count == 2
+
+    @patch("backend.football.routes.generate_reasoning")
+    @patch("backend.football.routes.save_prediction_bundle")
+    @patch("backend.football.routes.get_cached_reasoning")
+    @patch("backend.football.routes.get_cached_bundle")
+    @patch("backend.football.routes._get_engine")
+    async def test_reasoning_failure_returns_prediction_with_null(
+        self,
+        mock_engine_fn,
+        mock_cache_fn,
+        mock_cache_reasoning_fn,
+        mock_save_bundle,
+        mock_gen_reasoning,
+    ):
+        self._setup_fresh_prediction(mock_engine_fn, mock_cache_fn)
+        mock_save_bundle.return_value = []
+        mock_cache_reasoning_fn.return_value = None
+
+        # Agent blows up.
+        mock_gen_reasoning.side_effect = RuntimeError("Anthropic API down")
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/pre-match/100")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        # Deterministic prediction is present.
+        assert "predictions" in body
+        assert body["cached"] is False
+        # Reasoning failed gracefully.
+        assert body["reasoning"] is None
+        assert body["upset"] is None
+        # Deterministic save + commit still happened (commit before reasoning).
+        mock_save_bundle.assert_awaited_once()
+        self.mock_session.commit.assert_awaited()
+        # Only one commit — the reasoning commit never happened.
+        assert self.mock_session.commit.await_count == 1
+
+    @patch("backend.football.routes.generate_reasoning")
+    @patch("backend.football.routes.save_prediction_bundle")
+    @patch("backend.football.routes.get_cached_reasoning")
+    @patch("backend.football.routes.get_cached_bundle")
+    @patch("backend.football.routes._get_engine")
+    async def test_reasoning_cached_skips_agent(
+        self,
+        mock_engine_fn,
+        mock_cache_fn,
+        mock_cache_reasoning_fn,
+        mock_save_bundle,
+        mock_gen_reasoning,
+    ):
+        self._setup_fresh_prediction(mock_engine_fn, mock_cache_fn)
+        mock_save_bundle.return_value = []
+
+        # Reasoning cache hit.
+        cached_reasoning_row = _make_prediction_row(
+            prediction_type="reasoning"
+        )
+        cached_reasoning_row.payload = {
+            "paragraphs": ["Cached P1.", "Cached P2.", "Cached P3."],
+            "claims": [],
+            "upset_signals": [],
+            "upset_paths": [],
+            "validation_status": "valid",
+        }
+        cached_upset_row = _make_prediction_row(
+            prediction_type="upset_index"
+        )
+        cached_upset_row.payload = {
+            "upset_index": 0.30,
+            "deterministic_component": 0.20,
+            "agent_component": 0.40,
+            "bounded_agent": 0.35,
+            "upset_signals": [],
+            "upset_paths": [],
+        }
+        mock_cache_reasoning_fn.return_value = {
+            "reasoning": cached_reasoning_row,
+            "upset_index": cached_upset_row,
+        }
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/pre-match/100")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["reasoning"]["paragraphs"][0] == "Cached P1."
+        assert body["upset"]["upset_index"] == 0.30
+        # Agent was NOT called.
+        mock_gen_reasoning.assert_not_awaited()
+
+    @patch("backend.football.routes.save_prediction_bundle")
+    @patch("backend.football.routes.get_cached_bundle")
+    @patch("backend.football.routes._get_engine")
+    async def test_no_anthropic_key_returns_null_reasoning(
+        self,
+        mock_engine_fn,
+        mock_cache_fn,
+        mock_save_bundle,
+    ):
+        """When agent_client is None, reasoning is skipped cleanly."""
+        # Override agent to return None.
+        from backend.football.deps import get_agent_client
+
+        _app.dependency_overrides[get_agent_client] = lambda: None
+
+        self._setup_fresh_prediction(mock_engine_fn, mock_cache_fn)
+        mock_save_bundle.return_value = []
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/pre-match/100")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["reasoning"] is None
+        assert body["upset"] is None
+
+
+# ── Reasoning endpoint tests ────────────────────────────────────────
+
+
+class TestGetReasoning:
+    @pytest.fixture(autouse=True)
+    def _setup_deps(self):
+        self.mock_session = AsyncMock()
+
+        async def _override_session():
+            return self.mock_session
+
+        _app.dependency_overrides.clear()
+        from backend.shared.db import get_session
+
+        _app.dependency_overrides[get_session] = _override_session
+
+        yield
+        _app.dependency_overrides.clear()
+
+    @patch("backend.football.routes.get_latest_reasoning")
+    async def test_reasoning_exists(self, mock_get):
+        row = _make_prediction_row(prediction_type="reasoning")
+        row.payload = {
+            "paragraphs": ["P1.", "P2.", "P3."],
+            "claims": [],
+            "upset_signals": [],
+            "upset_paths": [],
+            "validation_status": "valid",
+        }
+        mock_get.return_value = row
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/reasoning/100")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["fixture_id"] == 100
+        assert body["prediction_type"] == "reasoning"
+        assert body["payload"]["paragraphs"] == ["P1.", "P2.", "P3."]
+
+    @patch("backend.football.routes.get_latest_reasoning")
+    async def test_reasoning_missing_returns_503(self, mock_get):
+        mock_get.return_value = None
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/reasoning/999")
+
+        assert resp.status_code == 503
+
+
+# ── Upset persistence tests ─────────────────────────────────────────
+
+
+class TestUpsetPersistence:
+    @pytest.mark.asyncio
+    async def test_upset_row_has_decimal_index(self):
+        """Verify save_upset_output sets Prediction.upset_index as Decimal."""
+        from decimal import Decimal
+        from unittest.mock import AsyncMock
+
+        from backend.football.persistence import save_upset_output
+
+        mock_session = AsyncMock()
+
+        # Build a minimal UpsetOutput-like object.
+        mock_upset = MagicMock()
+        mock_upset.upset_index = 0.277
+        mock_upset.deterministic_component = 0.217
+        mock_upset.agent_component = 0.40
+        mock_upset.bounded_agent = 0.367
+        mock_upset.upset_signals = []
+        mock_upset.upset_paths = []
+
+        row = await save_upset_output(
+            mock_session, fixture_id=100, upset_output=mock_upset,
+            stage="pre_lineup",
+        )
+
+        assert row.prediction_type == "upset_index"
+        assert row.model_version == "hybrid_v1"
+        assert isinstance(row.upset_index, Decimal)
+        assert row.upset_index == Decimal("0.28")

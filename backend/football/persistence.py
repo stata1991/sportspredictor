@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -354,6 +355,172 @@ async def get_cached_bundle(
         return None
 
     return by_type
+
+
+# ── Reasoning + upset persistence ─────────────────────────────────────
+
+REASONING_TYPES = ("reasoning", "upset_index")
+
+
+async def save_reasoning_output(
+    session: AsyncSession,
+    fixture_id: int,
+    reasoning_output: object,
+    stage: str,
+) -> Prediction:
+    """Persist reasoning output as a Prediction row.
+
+    Parameters
+    ----------
+    session:
+        Active async session (caller manages commit).
+    fixture_id:
+        API-Football fixture ID.
+    reasoning_output:
+        :class:`ReasoningOutput` from the reasoning module.
+    stage:
+        Current prediction stage (e.g. "pre_lineup").
+
+    Returns
+    -------
+    Flushed (not committed) Prediction row.
+    """
+    # Build payload — exclude internal fields not useful in the API response.
+    payload = reasoning_output.model_dump(mode="json")
+    payload.pop("generated_at", None)
+    payload.pop("cost_usd", None)
+    payload.pop("tokens_used", None)
+
+    row = Prediction(
+        fixture_id=fixture_id,
+        prediction_type="reasoning",
+        stage=stage,
+        payload=payload,
+        model_version=reasoning_output.model_version,
+    )
+    session.add(row)
+    await session.flush()
+
+    logger.info(
+        "Saved reasoning for fixture %d (stage=%s, status=%s)",
+        fixture_id,
+        stage,
+        reasoning_output.validation_status,
+    )
+    return row
+
+
+async def save_upset_output(
+    session: AsyncSession,
+    fixture_id: int,
+    upset_output: object,
+    stage: str,
+) -> Prediction:
+    """Persist upset index output as a Prediction row.
+
+    Parameters
+    ----------
+    session:
+        Active async session (caller manages commit).
+    fixture_id:
+        API-Football fixture ID.
+    upset_output:
+        :class:`UpsetOutput` from the upset module.
+    stage:
+        Current prediction stage.
+
+    Returns
+    -------
+    Flushed (not committed) Prediction row.
+    """
+    payload = {
+        "upset_index": upset_output.upset_index,
+        "deterministic_component": upset_output.deterministic_component,
+        "agent_component": upset_output.agent_component,
+        "bounded_agent": upset_output.bounded_agent,
+        "upset_signals": [
+            {"signal": s.signal, "direction": s.direction, "source": s.source}
+            for s in upset_output.upset_signals
+        ],
+        "upset_paths": upset_output.upset_paths,
+    }
+
+    row = Prediction(
+        fixture_id=fixture_id,
+        prediction_type="upset_index",
+        stage=stage,
+        payload=payload,
+        model_version="hybrid_v1",
+        upset_index=Decimal(str(round(upset_output.upset_index, 2))),
+    )
+    session.add(row)
+    await session.flush()
+
+    logger.info(
+        "Saved upset_index=%.4f for fixture %d (stage=%s)",
+        upset_output.upset_index,
+        fixture_id,
+        stage,
+    )
+    return row
+
+
+async def get_cached_reasoning(
+    session: AsyncSession,
+    fixture_id: int,
+    stage: str,
+    max_age_seconds: int = CACHE_MAX_AGE_SECONDS,
+) -> dict[str, Prediction] | None:
+    """Check for fresh reasoning + upset_index rows at a given stage.
+
+    Returns a dict ``{"reasoning": row, "upset_index": row}`` if both
+    exist and are within the TTL.  Returns ``None`` otherwise.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
+    stmt = (
+        select(Prediction)
+        .where(
+            Prediction.fixture_id == fixture_id,
+            Prediction.stage == stage,
+            Prediction.prediction_type.in_(REASONING_TYPES),
+            Prediction.made_at >= cutoff,
+        )
+        .order_by(Prediction.made_at.desc())
+    )
+    result = await session.execute(stmt)
+    rows = list(result.scalars().all())
+
+    by_type: dict[str, Prediction] = {}
+    for row in rows:
+        if row.prediction_type not in by_type:
+            by_type[row.prediction_type] = row
+
+    if set(by_type.keys()) != set(REASONING_TYPES):
+        return None
+
+    return by_type
+
+
+async def get_latest_reasoning(
+    session: AsyncSession,
+    fixture_id: int,
+) -> Prediction | None:
+    """Fetch the most recent reasoning row for a fixture (no TTL).
+
+    Used by the ``/predict/reasoning/{fixture_id}`` endpoint for
+    lightweight UI re-renders.
+    """
+    stmt = (
+        select(Prediction)
+        .where(
+            Prediction.fixture_id == fixture_id,
+            Prediction.prediction_type == "reasoning",
+        )
+        .order_by(Prediction.made_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
 
 
 # ── Accuracy rollups ─────────────────────────────────────────────────

@@ -6,14 +6,17 @@ Mounted at ``/api/football`` by main.py.
 from __future__ import annotations
 
 import logging
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.football.agent.client import AnthropicAgentClient
+from backend.football.agent.reasoning import ReasoningOutput, generate_reasoning
+from backend.football.agent.upset import UpsetOutput, compute_upset_index
 from backend.football.constants import BASE_URL, WC_LEAGUE_ID, WC_SEASON
 from backend.football.data_provider import APIFootballClient
-from backend.football.deps import get_football_client
+from backend.football.deps import get_agent_client, get_football_client
 from backend.football.exceptions import (
     APIFootballError,
     PlanLimitationError,
@@ -25,10 +28,14 @@ from backend.football.persistence import (
     get_all_accuracy_rollups,
     get_cached_bundle,
     get_cached_live_prediction,
+    get_cached_reasoning,
     get_latest_predictions_for_fixture,
+    get_latest_reasoning,
     get_predictions_for_fixture,
     save_live_prediction,
     save_prediction_bundle,
+    save_reasoning_output,
+    save_upset_output,
 )
 from backend.football.predictions.derivations import derive_live_v1
 from backend.football.predictions.engine import (
@@ -54,6 +61,39 @@ def _get_engine() -> PredictionEngine:
     if _engine is None:
         _engine = PredictionEngine()
     return _engine
+
+
+# ── Reasoning serialisation helpers ───────────────────────────────────
+
+
+def _reasoning_to_dict(r: ReasoningOutput) -> dict[str, Any]:
+    """Convert ReasoningOutput to a JSON-safe dict for the API response."""
+    return {
+        "paragraphs": r.paragraphs,
+        "claims": [{"text": c.text, "source": c.source} for c in r.claims],
+        "upset_index": r.upset_index,
+        "upset_signals": [
+            {"signal": s.signal, "direction": s.direction, "source": s.source}
+            for s in r.upset_signals
+        ],
+        "upset_paths": r.upset_paths,
+        "validation_status": r.validation_status,
+    }
+
+
+def _upset_to_dict(u: UpsetOutput) -> dict[str, Any]:
+    """Convert UpsetOutput to a JSON-safe dict for the API response."""
+    return {
+        "upset_index": u.upset_index,
+        "deterministic_component": u.deterministic_component,
+        "agent_component": u.agent_component,
+        "bounded_agent": u.bounded_agent,
+        "upset_signals": [
+            {"signal": s.signal, "direction": s.direction, "source": s.source}
+            for s in u.upset_signals
+        ],
+        "upset_paths": u.upset_paths,
+    }
 
 
 # ── Error translation ─────────────────────────────────────────────────
@@ -146,11 +186,17 @@ async def predict_pre_match(
     fixture_id: int,
     client: APIFootballClient = Depends(get_football_client),
     session: AsyncSession = Depends(get_session),
+    agent_client: AnthropicAgentClient | None = Depends(get_agent_client),
 ) -> dict:
     """Generate (or return cached) pre-match predictions for a fixture.
 
     1-hour cache per stage: if a fresh prediction exists at the current
     stage, return it.  Otherwise generate, persist, and return.
+
+    Reasoning generation (via Anthropic agent) runs after the
+    deterministic prediction is committed.  Agent failures are
+    caught and logged — the deterministic prediction is never
+    blocked by reasoning failures.
 
     - CompletedFixtureError  -> 200 with historical predictions
     - NotPredictableError    -> 422
@@ -216,6 +262,16 @@ async def predict_pre_match(
     # ── Check DB cache (1-hour freshness at current stage) ──────
     cached = await get_cached_bundle(session, fixture_id, stage.value)
     if cached is not None:
+        # Also check for cached reasoning.
+        reasoning_payload = None
+        upset_payload = None
+        cached_r = await get_cached_reasoning(
+            session, fixture_id, stage.value
+        )
+        if cached_r is not None:
+            reasoning_payload = cached_r["reasoning"].payload
+            upset_payload = cached_r["upset_index"].payload
+
         return {
             "fixture_id": fixture_id,
             "home_team": fx.teams.home.name,
@@ -224,13 +280,16 @@ async def predict_pre_match(
             "stage": stage.value,
             "cached": True,
             "predictions": {k: v.payload for k, v in cached.items()},
+            "reasoning": reasoning_payload,
+            "upset": upset_payload,
         }
 
     # ── Generate fresh predictions ──────────────────────────────
     engine = _get_engine()
     bundle = engine.predict(home_id, away_id, status, has_lineups=has_lineups)
 
-    # ── Persist ─────────────────────────────────────────────────
+    # ── Persist deterministic predictions ─────────────────────
+    # Commit BEFORE reasoning so agent failure can't roll back.
     await save_prediction_bundle(session, fixture_id, bundle)
     await session.commit()
 
@@ -239,6 +298,48 @@ async def predict_pre_match(
         fixture_id,
         stage.value,
     )
+
+    # ── Reasoning generation (failure-tolerant) ───────────────
+    reasoning_payload = None
+    upset_payload = None
+
+    if agent_client is not None:
+        # Check reasoning cache first.
+        cached_r = await get_cached_reasoning(
+            session, fixture_id, stage.value
+        )
+        if cached_r is not None:
+            reasoning_payload = cached_r["reasoning"].payload
+            upset_payload = cached_r["upset_index"].payload
+        else:
+            try:
+                reasoning_output = await generate_reasoning(
+                    agent_client=agent_client,
+                    football_client=client,
+                    bundle=bundle,
+                    fixture_id=fixture_id,
+                    home_team=fx.teams.home.name,
+                    away_team=fx.teams.away.name,
+                    home_team_id=home_id,
+                    away_team_id=away_id,
+                )
+                upset_output = compute_upset_index(bundle, reasoning_output)
+
+                await save_reasoning_output(
+                    session, fixture_id, reasoning_output, stage.value
+                )
+                await save_upset_output(
+                    session, fixture_id, upset_output, stage.value
+                )
+                await session.commit()
+
+                reasoning_payload = _reasoning_to_dict(reasoning_output)
+                upset_payload = _upset_to_dict(upset_output)
+            except Exception:
+                logger.exception(
+                    "Reasoning generation failed for fixture %d",
+                    fixture_id,
+                )
 
     return {
         "fixture_id": fixture_id,
@@ -257,6 +358,8 @@ async def predict_pre_match(
                 mode="json"
             ),
         },
+        "reasoning": reasoning_payload,
+        "upset": upset_payload,
     }
 
 
@@ -374,6 +477,34 @@ async def predict_live(
         "confidence": raw["confidence"],
         "cached": False,
         "predictions": {"live_winner": live},
+    }
+
+
+@router.get("/predict/reasoning/{fixture_id}")
+async def get_reasoning(
+    fixture_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return the latest reasoning for a fixture (pure DB read).
+
+    No agent call — returns the most recent reasoning row from the DB.
+    Used by the Phase 6 UI "Why" panel for lightweight re-renders.
+
+    Returns 503 if no reasoning has been generated yet.
+    """
+    row = await get_latest_reasoning(session, fixture_id)
+    if row is None:
+        raise HTTPException(
+            503,
+            "No reasoning generated yet for this fixture. Retry later.",
+        )
+    return {
+        "fixture_id": fixture_id,
+        "prediction_type": "reasoning",
+        "generated_at": (
+            row.made_at.isoformat() if row.made_at else None
+        ),
+        "payload": row.payload,
     }
 
 
