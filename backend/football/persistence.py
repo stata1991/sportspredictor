@@ -141,6 +141,48 @@ async def get_latest_predictions_for_fixture(
     return {row.prediction_type: row for row in result.scalars().all()}
 
 
+async def get_upsets_above_threshold(
+    session: AsyncSession,
+    threshold: float = 0.45,
+) -> list[Prediction]:
+    """Latest upset_index prediction per fixture where upset_index >= threshold.
+
+    Uses a subquery to find the most recent ``made_at`` per fixture for
+    ``prediction_type='upset_index'``, then filters by threshold on the
+    joined rows.
+
+    Returns Prediction rows ordered by ``upset_index`` descending.
+    Status filtering (upcoming vs completed) is the caller's concern —
+    fixture status lives in API-Football data, not the predictions table.
+    """
+    threshold_decimal = Decimal(str(threshold))
+
+    # Subquery: latest made_at per fixture for upset_index predictions.
+    latest = (
+        select(
+            Prediction.fixture_id,
+            func.max(Prediction.made_at).label("max_made_at"),
+        )
+        .where(Prediction.prediction_type == "upset_index")
+        .group_by(Prediction.fixture_id)
+        .subquery()
+    )
+
+    stmt = (
+        select(Prediction)
+        .join(
+            latest,
+            (Prediction.fixture_id == latest.c.fixture_id)
+            & (Prediction.made_at == latest.c.max_made_at)
+            & (Prediction.prediction_type == "upset_index"),
+        )
+        .where(Prediction.upset_index >= threshold_decimal)
+        .order_by(Prediction.upset_index.desc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
 # ── Outcomes (upsert) ────────────────────────────────────────────────
 
 

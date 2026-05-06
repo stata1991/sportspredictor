@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -828,3 +829,231 @@ class TestUpsetPersistence:
         assert row.model_version == "hybrid_v1"
         assert isinstance(row.upset_index, Decimal)
         assert row.upset_index == Decimal("0.28")
+
+
+# ── Upset watch endpoint ────────────────────────────────────────────
+
+
+def _make_upset_prediction_row(
+    fixture_id: int = 100,
+    upset_index_value: float = 0.50,
+    upset_paths: list[str] | None = None,
+) -> Prediction:
+    """Build a Prediction row with prediction_type='upset_index'."""
+    row = Prediction()
+    row.id = uuid.uuid4()
+    row.fixture_id = fixture_id
+    row.prediction_type = "upset_index"
+    row.stage = "pre_lineup"
+    row.made_at = datetime.now(timezone.utc)
+    row.payload = {
+        "upset_index": upset_index_value,
+        "deterministic_component": 0.30,
+        "agent_component": 0.40,
+        "bounded_agent": 0.37,
+        "upset_signals": [],
+        "upset_paths": upset_paths or [
+            "Path 1",
+            "Path 2",
+            "Path 3",
+        ],
+    }
+    row.model_version = "hybrid_v1"
+    row.upset_index = Decimal(str(round(upset_index_value, 2)))
+    row.confidence = None
+    return row
+
+
+class TestListUpsets:
+    @pytest.fixture(autouse=True)
+    def _setup_deps(self):
+        self.mock_client = AsyncMock()
+        self.mock_session = AsyncMock()
+
+        async def _override_client():
+            return self.mock_client
+
+        async def _override_session():
+            return self.mock_session
+
+        _app.dependency_overrides.clear()
+        from backend.football.deps import get_football_client
+        from backend.shared.db import get_session
+
+        _app.dependency_overrides[get_football_client] = _override_client
+        _app.dependency_overrides[get_session] = _override_session
+
+        yield
+        _app.dependency_overrides.clear()
+
+    @patch("backend.football.routes.get_upsets_above_threshold")
+    async def test_empty_db_returns_empty_list(self, mock_get_upsets):
+        mock_get_upsets.return_value = []
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/upsets")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 0
+        assert body["threshold"] == 0.45
+        assert body["upsets"] == []
+
+    @patch("backend.football.routes.get_upsets_above_threshold")
+    async def test_single_qualifying_fixture(self, mock_get_upsets):
+        pred = _make_upset_prediction_row(
+            fixture_id=100, upset_index_value=0.54
+        )
+        mock_get_upsets.return_value = [pred]
+
+        fx = _make_fixture(
+            fixture_id=100,
+            home_name="Mexico",
+            away_name="South Africa",
+        )
+        self.mock_client.get_fixtures = AsyncMock(return_value=[fx])
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/upsets")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 1
+        item = body["upsets"][0]
+        assert item["fixture_id"] == 100
+        assert item["home_team"] == "Mexico"
+        assert item["away_team"] == "South Africa"
+        assert item["upset_index"] == 0.54
+        assert item["upset_paths"] == ["Path 1", "Path 2", "Path 3"]
+        assert item["status"] == "NS"
+        assert item["round"] == "Group A - 1"
+        assert "kickoff" in item
+
+    @patch("backend.football.routes.get_upsets_above_threshold")
+    async def test_multiple_fixtures_preserve_sort_order(
+        self, mock_get_upsets
+    ):
+        # Persistence returns sorted by upset_index DESC.
+        pred_high = _make_upset_prediction_row(
+            fixture_id=200, upset_index_value=0.62
+        )
+        pred_low = _make_upset_prediction_row(
+            fixture_id=100, upset_index_value=0.48
+        )
+        mock_get_upsets.return_value = [pred_high, pred_low]
+
+        fx1 = _make_fixture(fixture_id=100, home_name="Brazil")
+        fx2 = _make_fixture(fixture_id=200, home_name="Germany")
+        self.mock_client.get_fixtures = AsyncMock(
+            return_value=[fx1, fx2]
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/upsets")
+
+        body = resp.json()
+        assert body["count"] == 2
+        assert body["upsets"][0]["upset_index"] == 0.62
+        assert body["upsets"][1]["upset_index"] == 0.48
+
+    @patch("backend.football.routes.get_upsets_above_threshold")
+    async def test_excludes_finished_fixtures(self, mock_get_upsets):
+        pred = _make_upset_prediction_row(
+            fixture_id=100, upset_index_value=0.55
+        )
+        mock_get_upsets.return_value = [pred]
+
+        fx = _make_fixture(
+            fixture_id=100,
+            status_short="FT",
+            status_long="Match Finished",
+        )
+        self.mock_client.get_fixtures = AsyncMock(return_value=[fx])
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/upsets")
+
+        body = resp.json()
+        assert body["count"] == 0
+        assert body["upsets"] == []
+
+    @patch("backend.football.routes.get_upsets_above_threshold")
+    async def test_custom_threshold_via_query_param(
+        self, mock_get_upsets
+    ):
+        mock_get_upsets.return_value = []
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get(
+                "/api/football/upsets?threshold=0.6"
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["threshold"] == 0.6
+        mock_get_upsets.assert_awaited_once_with(
+            self.mock_session, 0.6
+        )
+
+    @patch("backend.football.routes.get_upsets_above_threshold")
+    async def test_fixture_not_in_api_is_skipped(self, mock_get_upsets):
+        # Prediction for fixture 999, but API-Football only knows 100.
+        pred = _make_upset_prediction_row(
+            fixture_id=999, upset_index_value=0.50
+        )
+        mock_get_upsets.return_value = [pred]
+
+        fx = _make_fixture(fixture_id=100)
+        self.mock_client.get_fixtures = AsyncMock(return_value=[fx])
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/upsets")
+
+        body = resp.json()
+        assert body["count"] == 0
+        assert body["upsets"] == []
+
+    @patch("backend.football.routes.get_upsets_above_threshold")
+    async def test_api_football_failure_returns_error(
+        self, mock_get_upsets
+    ):
+        from backend.football.exceptions import UpstreamError
+
+        pred = _make_upset_prediction_row(fixture_id=100)
+        mock_get_upsets.return_value = [pred]
+        self.mock_client.get_fixtures = AsyncMock(
+            side_effect=UpstreamError("API down")
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/upsets")
+
+        assert resp.status_code == 503
+
+    @patch("backend.football.routes.get_upsets_above_threshold")
+    async def test_default_threshold_is_045(self, mock_get_upsets):
+        mock_get_upsets.return_value = []
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/upsets")
+
+        assert resp.status_code == 200
+        mock_get_upsets.assert_awaited_once_with(
+            self.mock_session, 0.45
+        )

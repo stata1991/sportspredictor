@@ -10,6 +10,15 @@ import uuid
 import logging
 import contextvars
 
+import sentry_sdk
+
+if os.environ.get("SENTRY_DSN"):
+    sentry_sdk.init(
+        dsn=os.environ["SENTRY_DSN"],
+        environment=os.environ.get("ENV", "development"),
+        traces_sample_rate=0.1,
+    )
+
 from backend.football.routes import router as football_router
 from backend.prediction_engine_api import pre_match_predictions, live_predictions, MatchNotFound
 from backend.live_data_provider import (

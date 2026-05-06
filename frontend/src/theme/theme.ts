@@ -70,8 +70,7 @@ const theme = createTheme({
     MuiAppBar: {
       styleOverrides: {
         root: {
-          background: 'linear-gradient(90deg, #ff6f00, #ec407a)',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+          boxShadow: 'none',
         },
       },
     },

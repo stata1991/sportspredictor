@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.football.agent.client import AnthropicAgentClient
@@ -32,6 +32,7 @@ from backend.football.persistence import (
     get_latest_predictions_for_fixture,
     get_latest_reasoning,
     get_predictions_for_fixture,
+    get_upsets_above_threshold,
     save_live_prediction,
     save_prediction_bundle,
     save_reasoning_output,
@@ -49,6 +50,28 @@ from backend.shared.db import get_session
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# ── CDN Cache-Control TTLs (seconds) ────────────────────────────────
+# These drive CloudFront / browser caching via Cache-Control headers.
+
+_CC_FIXTURES_LIST = 300      # 5 min  — schedule changes infrequently
+_CC_FIXTURE_NS = 300         # 5 min  — not started, low volatility
+_CC_FIXTURE_LIVE = 30        # 30 s   — in-play, high volatility
+_CC_FIXTURE_COMPLETED = 86400  # 24 h — result is final
+_CC_COVERAGE = 3600          # 1 h    — coverage flags rarely change
+_CC_UPSETS = 120             # 2 min  — new upsets can appear
+_CC_PRE_MATCH_FRESH = 1800   # 30 min — freshly generated
+_CC_PRE_MATCH_CACHED = 300   # 5 min  — already cached, shorter refresh
+_CC_LIVE_PRED = 30           # 30 s   — real-time
+_CC_REASONING = 300          # 5 min  — stable once generated
+_CC_HISTORY = 120            # 2 min  — append-only, moderate
+_CC_ACCURACY = 300           # 5 min  — computed periodically
+
+
+def _set_cache(response: Response, max_age: int) -> None:
+    """Set Cache-Control header for CDN and browser caching."""
+    response.headers["Cache-Control"] = f"public, max-age={max_age}"
 
 # ── Prediction engine singleton ──────────────────────────────────────
 
@@ -126,6 +149,7 @@ async def health() -> dict:
 
 @router.get("/fixtures")
 async def list_fixtures(
+    response: Response,
     league: int = WC_LEAGUE_ID,
     season: int = WC_SEASON,
     client: APIFootballClient = Depends(get_football_client),
@@ -136,6 +160,7 @@ async def list_fixtures(
     except APIFootballError as exc:
         _raise_for_football_error(exc)
 
+    _set_cache(response, _CC_FIXTURES_LIST)
     return {
         "count": len(fixtures),
         "fixtures": [fx.model_dump(mode="json") for fx in fixtures],
@@ -145,6 +170,7 @@ async def list_fixtures(
 @router.get("/fixtures/{fixture_id}")
 async def get_fixture(
     fixture_id: int,
+    response: Response,
     client: APIFootballClient = Depends(get_football_client),
 ) -> dict:
     """Single fixture by ID."""
@@ -157,11 +183,19 @@ async def get_fixture(
         raise HTTPException(
             status_code=404, detail=f"Fixture {fixture_id} not found"
         )
+    status = fixture.fixture.status.short
+    if status in _FINISHED_STATUSES:
+        _set_cache(response, _CC_FIXTURE_COMPLETED)
+    elif status in ("1H", "2H", "HT", "ET", "BT", "P", "INT", "LIVE"):
+        _set_cache(response, _CC_FIXTURE_LIVE)
+    else:
+        _set_cache(response, _CC_FIXTURE_NS)
     return fixture.model_dump(mode="json")
 
 
 @router.get("/coverage")
 async def get_coverage(
+    response: Response,
     client: APIFootballClient = Depends(get_football_client),
 ) -> dict:
     """Coverage flags for WC 2026 with gap warnings."""
@@ -174,8 +208,89 @@ async def get_coverage(
         raise HTTPException(
             status_code=404, detail="Coverage data not available"
         )
+    _set_cache(response, _CC_COVERAGE)
     status = CoverageStatus.from_af_coverage(cov)
     return status.model_dump()
+
+
+# ── Upset watch endpoint ──────────────────────────────────────────────
+
+# Statuses for finished/cancelled fixtures — excluded from upset watch.
+_FINISHED_STATUSES = frozenset(
+    {"FT", "AET", "PST", "CANC", "ABD", "AWD", "WO"}
+)
+
+
+@router.get("/upsets")
+async def list_upsets(
+    response: Response,
+    threshold: float = Query(0.45, ge=0.0, le=1.0),
+    client: APIFootballClient = Depends(get_football_client),
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Upset watch list — fixtures with upset_index >= threshold.
+
+    Read-only DB query + fixture metadata from API-Football.
+    Never triggers prediction generation.  Returns only upcoming/live
+    fixtures (excludes FT, AET, PST, CANC, etc.).
+
+    Sorted by upset_index descending.
+    """
+    _set_cache(response, _CC_UPSETS)
+
+    # 1. Query DB for qualifying predictions.
+    predictions = await get_upsets_above_threshold(session, threshold)
+    if not predictions:
+        return {"count": 0, "threshold": threshold, "upsets": []}
+
+    # 2. Fetch all fixtures for the league/season (cached by data provider).
+    try:
+        all_fixtures = await client.get_fixtures(
+            league=WC_LEAGUE_ID, season=WC_SEASON
+        )
+    except APIFootballError as exc:
+        _raise_for_football_error(exc)
+
+    # 3. Build fixture lookup by ID.
+    fixture_map = {fx.fixture.id: fx for fx in all_fixtures}
+
+    # 4. Combine prediction data with fixture metadata, filtering out
+    #    finished/cancelled fixtures.
+    upsets: list[dict] = []
+    for pred in predictions:
+        fx = fixture_map.get(pred.fixture_id)
+        if fx is None:
+            logger.warning(
+                "Fixture %d has upset prediction but not found in "
+                "API-Football fixtures list",
+                pred.fixture_id,
+            )
+            continue
+
+        status = fx.fixture.status.short
+        if status in _FINISHED_STATUSES:
+            continue
+
+        upsets.append(
+            {
+                "fixture_id": pred.fixture_id,
+                "home_team": fx.teams.home.name,
+                "away_team": fx.teams.away.name,
+                "home_logo": fx.teams.home.logo,
+                "away_logo": fx.teams.away.logo,
+                "kickoff": fx.fixture.date.isoformat(),
+                "status": status,
+                "round": fx.league.round,
+                "upset_index": float(pred.upset_index),
+                "upset_paths": pred.payload.get("upset_paths", []),
+            }
+        )
+
+    return {
+        "count": len(upsets),
+        "threshold": threshold,
+        "upsets": upsets,
+    }
 
 
 # ── Prediction endpoints ─────────────────────────────────────────────
@@ -184,6 +299,7 @@ async def get_coverage(
 @router.get("/predict/pre-match/{fixture_id}")
 async def predict_pre_match(
     fixture_id: int,
+    response: Response,
     client: APIFootballClient = Depends(get_football_client),
     session: AsyncSession = Depends(get_session),
     agent_client: AnthropicAgentClient | None = Depends(get_agent_client),
@@ -232,6 +348,7 @@ async def predict_pre_match(
         latest = await get_latest_predictions_for_fixture(
             session, fixture_id
         )
+        _set_cache(response, _CC_FIXTURE_COMPLETED)
         return {
             "fixture_id": fixture_id,
             "home_team": fx.teams.home.name,
@@ -272,6 +389,7 @@ async def predict_pre_match(
             reasoning_payload = cached_r["reasoning"].payload
             upset_payload = cached_r["upset_index"].payload
 
+        _set_cache(response, _CC_PRE_MATCH_CACHED)
         return {
             "fixture_id": fixture_id,
             "home_team": fx.teams.home.name,
@@ -341,6 +459,7 @@ async def predict_pre_match(
                     fixture_id,
                 )
 
+    _set_cache(response, _CC_PRE_MATCH_FRESH)
     return {
         "fixture_id": fixture_id,
         "home_team": fx.teams.home.name,
@@ -366,6 +485,7 @@ async def predict_pre_match(
 @router.get("/predict/live/{fixture_id}")
 async def predict_live(
     fixture_id: int,
+    response: Response,
     client: APIFootballClient = Depends(get_football_client),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
@@ -397,6 +517,7 @@ async def predict_live(
         latest = await get_latest_predictions_for_fixture(
             session, fixture_id
         )
+        _set_cache(response, _CC_FIXTURE_COMPLETED)
         return {
             "fixture_id": fixture_id,
             "home_team": fx.teams.home.name,
@@ -432,6 +553,7 @@ async def predict_live(
         session, fixture_id, elapsed
     )
     if cached_row is not None:
+        _set_cache(response, _CC_LIVE_PRED)
         return {
             "fixture_id": fixture_id,
             "home_team": fx.teams.home.name,
@@ -468,6 +590,7 @@ async def predict_live(
         elapsed,
     )
 
+    _set_cache(response, _CC_LIVE_PRED)
     return {
         "fixture_id": fixture_id,
         "home_team": fx.teams.home.name,
@@ -483,6 +606,7 @@ async def predict_live(
 @router.get("/predict/reasoning/{fixture_id}")
 async def get_reasoning(
     fixture_id: int,
+    response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Return the latest reasoning for a fixture (pure DB read).
@@ -498,6 +622,7 @@ async def get_reasoning(
             503,
             "No reasoning generated yet for this fixture. Retry later.",
         )
+    _set_cache(response, _CC_REASONING)
     return {
         "fixture_id": fixture_id,
         "prediction_type": "reasoning",
@@ -511,6 +636,7 @@ async def get_reasoning(
 @router.get("/predictions/history/{fixture_id}")
 async def prediction_history(
     fixture_id: int,
+    response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """All predictions for a fixture, ordered by made_at DESC.
@@ -521,6 +647,7 @@ async def prediction_history(
     """
     rows = await get_predictions_for_fixture(session, fixture_id)
 
+    _set_cache(response, _CC_HISTORY)
     return {
         "fixture_id": fixture_id,
         "count": len(rows),
@@ -543,6 +670,7 @@ async def prediction_history(
 
 @router.get("/accuracy")
 async def get_accuracy(
+    response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Accuracy rollups — structured per (window, prediction_type).
@@ -553,11 +681,13 @@ async def get_accuracy(
     rollups = await get_all_accuracy_rollups(session)
 
     if not rollups:
+        _set_cache(response, _CC_ACCURACY)
         return {
             "rollups": [],
             "message": "No accuracy rollups computed yet.",
         }
 
+    _set_cache(response, _CC_ACCURACY)
     return {
         "rollups": [
             {

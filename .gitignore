@@ -33,3 +33,6 @@ backend/football/historical/data/
 
 # Evaluation output (plots, intermediate results)
 backend/football/evaluation/output/
+
+# Checkpoint review artifacts
+.checkpoints/

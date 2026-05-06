@@ -454,6 +454,29 @@ class FixtureDetail(FixtureListItem):
     score: AFScore | None = None
 
 
+class UpsetListItem(BaseModel):
+    """Single fixture in the upset watch list."""
+
+    fixture_id: int
+    home_team: str
+    away_team: str
+    home_logo: str | None = None
+    away_logo: str | None = None
+    kickoff: str  # ISO 8601 from API-Football
+    status: str  # NS, 1H, HT, 2H, ET, etc.
+    round: str | None = None
+    upset_index: float
+    upset_paths: list[str]
+
+
+class UpsetListResponse(BaseModel):
+    """Response envelope for GET /api/football/upsets."""
+
+    count: int
+    threshold: float
+    upsets: list[UpsetListItem]
+
+
 class CoverageStatus(BaseModel):
     """Flat coverage flags with warnings for expected-but-missing coverage."""
 
