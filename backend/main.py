@@ -10,6 +10,16 @@ import uuid
 import logging
 import contextvars
 
+import sentry_sdk
+
+if os.environ.get("SENTRY_DSN"):
+    sentry_sdk.init(
+        dsn=os.environ["SENTRY_DSN"],
+        environment=os.environ.get("ENV", "development"),
+        traces_sample_rate=0.1,
+    )
+
+from backend.football.routes import router as football_router
 from backend.prediction_engine_api import pre_match_predictions, live_predictions, MatchNotFound
 from backend.live_data_provider import (
     fetch_live_data_for_series,
@@ -43,7 +53,11 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 
 IPL_SERIES_ID = int(os.getenv("IPL_SERIES_ID", "9237"))
 
-app = FastAPI(title="Cricket Prediction API", version="2.0")
+app = FastAPI(
+    title="FantasyFuel API",
+    description="Multi-sport prediction platform",
+    version="0.2.0",
+)
 router = APIRouter(prefix="/api")
 
 app.add_middleware(CorrelationIdMiddleware)
@@ -323,3 +337,4 @@ def health_check():
 
 
 app.include_router(router)
+app.include_router(football_router, prefix="/api/football", tags=["football"])

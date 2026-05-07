@@ -263,9 +263,11 @@ def test_live_total_score_range_1st_innings(mock_fetch, mock_details, mock_featu
     assert result["prediction_stage"] == "live"
 
     projected = result["projected_total"]
-    # 90 runs in 10 overs = 9.0 run-rate; 10 remaining overs -> 90 + 90 = 180
+    # Phase-aware projection at overs=10 (middle phase) with venue avg 165:
+    #   middle_rpo = (165*0.45)/9 ≈ 8.25, death_rpo = (165*0.27)/5 ≈ 8.91
+    #   projected = 90 + 8.25*5 + 8.91*5 ≈ 176
     assert projected is not None
-    assert abs(projected - 180) <= 1, f"Expected projected_total ~180, got {projected}"
+    assert abs(projected - 176) <= 2, f"Expected projected_total ~176, got {projected}"
 
     # total_score mid should be close to projected_total, NOT the static venue avg (165)
     mid = result["total_score"]["mid"]

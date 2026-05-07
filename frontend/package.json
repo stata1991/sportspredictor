@@ -7,6 +7,7 @@
     "@emotion/styled": "^11.14.0",
     "@mui/icons-material": "^7.0.1",
     "@mui/material": "^7.0.1",
+    "@sentry/react": "^10.51.0",
     "@stripe/stripe-js": "^7.0.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
@@ -27,9 +28,26 @@
   },
   "scripts": {
     "start": "react-scripts start",
+    "prebuild": "test -n \"$PUPPETEER_EXECUTABLE_PATH\" || (echo 'ERROR: PUPPETEER_EXECUTABLE_PATH must be set for react-snap. See README.' && exit 1)",
     "build": "react-scripts build",
+    "postbuild": "react-snap",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
+  },
+  "reactSnap": {
+    "include": [
+      "/",
+      "/football/world-cup-2026",
+      "/football/upsets",
+      "/auth",
+      "/privacy",
+      "/about"
+    ],
+    "skipThirdPartyRequests": true,
+    "puppeteerArgs": [
+      "--no-sandbox",
+      "--disable-setuid-sandbox"
+    ]
   },
   "eslintConfig": {
     "extends": [
@@ -50,6 +68,17 @@
     ]
   },
   "devDependencies": {
-    "@types/react-router-dom": "^5.3.3"
+    "@types/react-router-dom": "^5.3.3",
+    "react-snap": "^1.23.0"
+  },
+  "jest": {
+    "transformIgnorePatterns": [
+      "/node_modules/(?!axios|react-router|react-router-dom)/"
+    ],
+    "moduleNameMapper": {
+      "^react-router-dom$": "<rootDir>/node_modules/react-router-dom/dist/index.js",
+      "^react-router$": "<rootDir>/node_modules/react-router/dist/development/index.js",
+      "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js"
+    }
   }
 }

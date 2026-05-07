@@ -9,6 +9,13 @@ import LiveMatchPage from './pages/LiveMatchPage';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage'; // ✅ Ensure this path is correct
 import T20WorldCupPage from './pages/T20WorldCupPage';
+import WorldCup2026Page from './pages/football/WorldCup2026Page';
+import MatchPage from './pages/football/MatchPage';
+import UpsetsPage from './pages/football/UpsetsPage';
+import NotFoundPage from './pages/NotFoundPage';
+import PrivacyPage from './pages/PrivacyPage';
+import AboutPage from './pages/AboutPage';
+import Footer from './components/Footer';
 import { AuthProvider } from './context/AuthContext';
 
 const AppContent: React.FC = () => {
@@ -31,9 +38,16 @@ const AppContent: React.FC = () => {
         <Route path="/" element={<HomePage />} />
         <Route path="/cricket/ipl" element={<PreMatchPage />} />
         <Route path="/cricket/t20-world-cup" element={<T20WorldCupPage />} />
+        <Route path="/football/world-cup-2026" element={<WorldCup2026Page />} />
+        <Route path="/football/match/:fixtureId" element={<MatchPage />} />
+        <Route path="/football/upsets" element={<UpsetsPage />} />
         <Route path="/live" element={<LiveMatchPage />} />
         <Route path="/auth" element={<AuthPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/about" element={<AboutPage />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      <Footer />
     </div>
   );
 };

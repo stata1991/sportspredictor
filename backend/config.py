@@ -4,6 +4,7 @@ CACHE_ENABLED = os.getenv("CACHE_ENABLED", "true").lower() in {"1", "true", "yes
 REDIS_URL = os.getenv("REDIS_URL")
 CACHE_NAMESPACE = os.getenv("CACHE_NAMESPACE", "sportspredictor")
 CACHE_VERSION = os.getenv("CACHE_VERSION", "v1")
+CACHE_MAX_SIZE: int = int(os.getenv("CACHE_MAX_SIZE", "10000"))
 
 SERIES_TTL = 3600
 SERIES_SCHEDULE_TTL = 86400  # 24h — tournament schedule rarely changes
