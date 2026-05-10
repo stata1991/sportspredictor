@@ -10,7 +10,7 @@ const theme = createTheme({
       main: '#ec407a', // Vibrant pink
     },
     background: {
-      default: 'linear-gradient(to bottom right, #0d0d0d, #1a1a1a)', // Sleek dark base
+      default: '#0d0d0d',
       paper: 'rgba(40, 40, 40, 0.95)', // Depth with subtle transparency
     },
     text: {

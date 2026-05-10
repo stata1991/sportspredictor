@@ -30,13 +30,13 @@ const sportsData = [
 
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [soccerAnchorEl, setSoccerAnchorEl] = useState<null | HTMLElement>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedSport, setSelectedSport] = useState("");
 
   const handleCardClick = (sport: string, event: React.MouseEvent<HTMLElement>) => {
-    if (sport === "Cricket") {
-      setAnchorEl(event.currentTarget);
+    if (sport === "Soccer") {
+      setSoccerAnchorEl(event.currentTarget);
       return;
     }
     setSelectedSport(sport);
@@ -121,33 +121,31 @@ const HomePage: React.FC = () => {
       </Box>
 
       <Menu
-        anchorEl={anchorEl}
-        open={Boolean(anchorEl)}
-        onClose={() => setAnchorEl(null)}
+        anchorEl={soccerAnchorEl}
+        open={Boolean(soccerAnchorEl)}
+        onClose={() => setSoccerAnchorEl(null)}
       >
         <MenuItem
           onClick={() => {
-            setAnchorEl(null);
-            navigate("/cricket/ipl");
+            setSoccerAnchorEl(null);
+            navigate("/football/world-cup-2026");
           }}
         >
-          IPL
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setAnchorEl(null);
-            navigate("/cricket/t20-world-cup");
-          }}
-        >
-          T20 World Cup
+          FIFA World Cup 2026
         </MenuItem>
       </Menu>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)}>
-        <DialogTitle>{selectedSport} - Coming Soon</DialogTitle>
+        <DialogTitle>
+          {selectedSport === "Cricket"
+            ? "Cricket \u2014 Paused"
+            : `${selectedSport} - Coming Soon`}
+        </DialogTitle>
         <DialogContent>
           <DialogContentText>
-            We are building {selectedSport} predictions next.
+            {selectedSport === "Cricket"
+              ? "Cricket predictions are temporarily paused. They\u2019ll be back shortly with new tournaments."
+              : `We are building ${selectedSport} predictions next.`}
           </DialogContentText>
         </DialogContent>
         <DialogActions>

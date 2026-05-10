@@ -5,11 +5,13 @@ import theme from './theme/theme';
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import Header from './components/Header';
 import PreMatchPage from './pages/PreMatchPage';
-import LiveMatchPage from './pages/LiveMatchPage';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage'; // ✅ Ensure this path is correct
 import T20WorldCupPage from './pages/T20WorldCupPage';
-import WorldCup2026Page from './pages/football/WorldCup2026Page';
+import WorldCup2026Layout from './pages/football/WorldCup2026Layout';
+import SchedulePage from './pages/football/SchedulePage';
+import LiveMatchPage from './pages/football/LiveMatchPage';
+import TrackRecordPage from './pages/football/TrackRecordPage';
 import MatchPage from './pages/football/MatchPage';
 import UpsetsPage from './pages/football/UpsetsPage';
 import NotFoundPage from './pages/NotFoundPage';
@@ -25,11 +27,6 @@ const AppContent: React.FC = () => {
   return (
     <div
       style={{
-        backgroundImage: `url(${isHome ? '/home.png' : '/stadium-bg.jpg'})`,
-        backgroundSize: 'cover',
-        backgroundRepeat: 'no-repeat',
-        backgroundAttachment: 'fixed',
-        backgroundPosition: 'center',
         minHeight: '100vh',
       }}
     >
@@ -38,10 +35,13 @@ const AppContent: React.FC = () => {
         <Route path="/" element={<HomePage />} />
         <Route path="/cricket/ipl" element={<PreMatchPage />} />
         <Route path="/cricket/t20-world-cup" element={<T20WorldCupPage />} />
-        <Route path="/football/world-cup-2026" element={<WorldCup2026Page />} />
+        <Route path="/football/world-cup-2026" element={<WorldCup2026Layout />}>
+          <Route index element={<SchedulePage />} />
+          <Route path="live" element={<LiveMatchPage />} />
+          <Route path="track-record" element={<TrackRecordPage />} />
+        </Route>
         <Route path="/football/match/:fixtureId" element={<MatchPage />} />
         <Route path="/football/upsets" element={<UpsetsPage />} />
-        <Route path="/live" element={<LiveMatchPage />} />
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/about" element={<AboutPage />} />

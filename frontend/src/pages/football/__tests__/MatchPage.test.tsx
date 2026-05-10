@@ -9,6 +9,22 @@ import { FULL_RESPONSE } from '../../../football/__fixtures__/sampleResponse';
 jest.mock('../../../api');
 const mockedApi = api as jest.Mocked<typeof api>;
 
+// Mock LiveMatchSection to avoid real polling in MatchPage tests
+jest.mock('../../../football/components/LiveMatchSection', () => {
+  return function MockLiveMatchSection(props: {
+    fixtureId: number;
+    initialStatus: string;
+  }) {
+    return (
+      <div
+        data-testid="live-match-section"
+        data-fixture-id={props.fixtureId}
+        data-initial-status={props.initialStatus}
+      />
+    );
+  };
+});
+
 const renderMatchPage = (fixtureId = '1489369') =>
   render(
     <MemoryRouter initialEntries={[`/football/match/${fixtureId}`]}>
@@ -62,7 +78,7 @@ describe('MatchPage', () => {
     expect(screen.getByText(/999/)).toBeInTheDocument();
   });
 
-  test('shows not-predictable error for 422', async () => {
+  test('shows MatchUnavailableSection for not-predictable 422', async () => {
     const axiosError = Object.assign(new Error('Unprocessable'), {
       isAxiosError: true,
       response: {
@@ -75,10 +91,36 @@ describe('MatchPage', () => {
     renderMatchPage();
 
     await waitFor(() => {
-      expect(screen.getByTestId('error-not-predictable')).toBeInTheDocument();
+      expect(screen.getByTestId('match-unavailable')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Not Predictable')).toBeInTheDocument();
+    expect(screen.getByText('Match Unavailable')).toBeInTheDocument();
+    expect(
+      screen.getByText('This match has been postponed.'),
+    ).toBeInTheDocument();
+  });
+
+  test('renders LiveMatchSection for live 422', async () => {
+    const liveError = Object.assign(new Error('Unprocessable'), {
+      isAxiosError: true,
+      response: {
+        status: 422,
+        data: {
+          detail: 'Fixture is live. Use /predict/live/{fixture_id} instead.',
+        },
+      },
+    });
+    mockedApi.get.mockRejectedValueOnce(liveError);
+
+    renderMatchPage('1536931');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('live-match-section')).toBeInTheDocument();
+    });
+
+    const el = screen.getByTestId('live-match-section');
+    expect(el).toHaveAttribute('data-fixture-id', '1536931');
+    expect(el).toHaveAttribute('data-initial-status', '1H');
   });
 
   test('shows network error with retry for 500', async () => {
@@ -138,6 +180,38 @@ describe('MatchPage', () => {
     });
 
     expect(screen.getByTestId('partial-agent-notice')).toBeInTheDocument();
+  });
+
+  test('shows LiveBadge with FT for completed fixture', async () => {
+    const completedResponse = {
+      ...FULL_RESPONSE,
+      status: 'FT',
+      stage: 'completed',
+      cached: true,
+      message: 'Fixture already completed. Returning most recent pre-match predictions.',
+    };
+    mockedApi.get.mockResolvedValueOnce({ data: completedResponse });
+
+    renderMatchPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('why-panel')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('live-badge')).toBeInTheDocument();
+    expect(screen.getByTestId('live-label')).toHaveTextContent('FT');
+  });
+
+  test('does not show LiveBadge for pre-match fixture', async () => {
+    mockedApi.get.mockResolvedValueOnce({ data: FULL_RESPONSE });
+
+    renderMatchPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('why-panel')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('live-badge')).not.toBeInTheDocument();
   });
 
   test('back button navigates to fixtures page', async () => {

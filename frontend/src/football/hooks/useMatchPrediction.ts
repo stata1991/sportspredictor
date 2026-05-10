@@ -11,13 +11,14 @@ import {
 
 // ── Public types ───────────────────────────────────────────────────
 
-export type ErrorKind = 'completed' | 'not_predictable' | 'not_found' | 'network' | 'unknown';
+export type ErrorKind = 'completed' | 'live' | 'not_predictable' | 'not_found' | 'network' | 'unknown';
 
 export interface UseMatchPredictionResult {
   prediction: DeterministicPrediction | null;
   reasoning: Reasoning | null;
   upset: Upset | null;
   stage: FixtureStage | null;
+  fixtureStatus: string | null;
   homeTeam: string | null;
   awayTeam: string | null;
   partialAgent: boolean;
@@ -33,6 +34,7 @@ const IDLE: UseMatchPredictionResult = {
   reasoning: null,
   upset: null,
   stage: null,
+  fixtureStatus: null,
   homeTeam: null,
   awayTeam: null,
   partialAgent: false,
@@ -47,8 +49,8 @@ const IDLE: UseMatchPredictionResult = {
  * Classify an axios error into an ErrorKind.
  *
  * Mapping (verified against live backend):
+ *   422 + detail contains "live"            → 'live'
  *   422 + detail contains "not predictable" → 'not_predictable'
- *   422 (other, e.g. live redirect)         → 'not_predictable'
  *   404                                     → 'not_found'
  *   Other 4xx / 5xx                         → 'network'
  *   No response (network failure)           → 'network'
@@ -64,8 +66,7 @@ function classifyError(err: unknown): ErrorKind {
 
     if (status === 404) return 'not_found';
     if (status === 422) {
-      if (detail.includes('not predictable')) return 'not_predictable';
-      // Live redirect also comes as 422
+      if (detail.includes('live')) return 'live';
       return 'not_predictable';
     }
     if (status !== undefined) return 'network'; // 500, 502, 503, etc.
@@ -73,6 +74,21 @@ function classifyError(err: unknown): ErrorKind {
     return 'network';
   }
   return 'unknown';
+}
+
+/**
+ * Extract the fixture status code from a 422 error detail string.
+ * e.g. "Fixture status 'PST' is not predictable" → 'PST'
+ */
+function parseFixtureStatusFromError(err: unknown): string | null {
+  if (axios.isAxiosError(err)) {
+    const rawDetail = err.response?.data?.detail;
+    if (typeof rawDetail === 'string') {
+      const match = rawDetail.match(/'(\w+)'/);
+      return match ? match[1] : null;
+    }
+  }
+  return null;
 }
 
 // ── Hook ───────────────────────────────────────────────────────────
@@ -114,6 +130,7 @@ export function useMatchPrediction(
           reasoning: data.reasoning ?? null,
           upset: data.upset ?? null,
           stage: data.stage,
+          fixtureStatus: data.status,
           homeTeam: data.home_team,
           awayTeam: data.away_team,
           partialAgent: !hasReasoning,
@@ -125,6 +142,7 @@ export function useMatchPrediction(
         if (controller.signal.aborted) return;
 
         const errorKind = classifyError(err);
+        const fixtureStatus = parseFixtureStatusFromError(err);
         const message = err instanceof Error ? err.message : String(err);
 
         setResult({
@@ -132,6 +150,7 @@ export function useMatchPrediction(
           reasoning: null,
           upset: null,
           stage: null,
+          fixtureStatus,
           homeTeam: null,
           awayTeam: null,
           partialAgent: false,

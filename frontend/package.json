@@ -38,6 +38,8 @@
     "include": [
       "/",
       "/football/world-cup-2026",
+      "/football/world-cup-2026/live",
+      "/football/world-cup-2026/track-record",
       "/football/upsets",
       "/auth",
       "/privacy",

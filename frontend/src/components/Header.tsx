@@ -14,14 +14,9 @@ const Header: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser } = useAuth();
-  const [cricketAnchorEl, setCricketAnchorEl] = React.useState<null | HTMLElement>(null);
   const [footballAnchorEl, setFootballAnchorEl] = React.useState<null | HTMLElement>(null);
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: string) => {
-    if (newValue === '/cricket-menu') {
-      setCricketAnchorEl(event.currentTarget as HTMLElement);
-      return;
-    }
     if (newValue === '/football-menu') {
       setFootballAnchorEl(event.currentTarget as HTMLElement);
       return;
@@ -29,11 +24,7 @@ const Header: React.FC = () => {
     navigate(newValue);
   };
 
-  const currentTab: string | false = location.pathname.startsWith('/live')
-    ? '/live'
-    : location.pathname.startsWith('/cricket/')
-    ? '/cricket-menu'
-    : location.pathname.startsWith('/football/')
+  const currentTab: string | false = location.pathname.startsWith('/football/')
     ? '/football-menu'
     : false;
 
@@ -119,16 +110,6 @@ const Header: React.FC = () => {
           <Tab
             label={
               <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                Cricket
-                <ArrowDropDownIcon fontSize="small" />
-              </Box>
-            }
-            value="/cricket-menu"
-            sx={{ color: 'white' }}
-          />
-          <Tab
-            label={
-              <Box sx={{ display: 'flex', alignItems: 'center' }}>
                 Football
                 <ArrowDropDownIcon fontSize="small" />
               </Box>
@@ -136,7 +117,6 @@ const Header: React.FC = () => {
             value="/football-menu"
             sx={{ color: 'white' }}
           />
-          <Tab label="Live Predictions" value="/live" sx={{ color: 'white' }} />
           {AUTH_ENABLED && (
             currentUser ? (
               <Tab label="Sign Out" onClick={handleSignOut} sx={{ color: 'white' }} />
@@ -145,28 +125,6 @@ const Header: React.FC = () => {
             )
           )}
         </Tabs>
-        <Menu
-          anchorEl={cricketAnchorEl}
-          open={Boolean(cricketAnchorEl)}
-          onClose={() => setCricketAnchorEl(null)}
-        >
-          <MenuItem
-            onClick={() => {
-              setCricketAnchorEl(null);
-              navigate('/cricket/ipl');
-            }}
-          >
-            IPL
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              setCricketAnchorEl(null);
-              navigate('/cricket/t20-world-cup');
-            }}
-          >
-            T20 World Cup
-          </MenuItem>
-        </Menu>
         <Menu
           anchorEl={footballAnchorEl}
           open={Boolean(footballAnchorEl)}
