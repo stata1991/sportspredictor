@@ -1,5 +1,6 @@
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
+import { HelmetProvider } from 'react-helmet-async';
 import TrackRecordPage from '../TrackRecordPage';
 import * as useAccuracyModule from '../../../football/hooks/useAccuracy';
 
@@ -18,7 +19,7 @@ describe('TrackRecordPage', () => {
       error: null,
     });
 
-    render(<TrackRecordPage />);
+    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
     expect(screen.getByTestId('loading-state')).toBeInTheDocument();
   });
 
@@ -29,7 +30,7 @@ describe('TrackRecordPage', () => {
       error: 'Server error',
     });
 
-    render(<TrackRecordPage />);
+    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
     expect(screen.getByTestId('error-state')).toBeInTheDocument();
     expect(screen.getByText('Could not load accuracy data')).toBeInTheDocument();
   });
@@ -41,7 +42,7 @@ describe('TrackRecordPage', () => {
       error: null,
     });
 
-    render(<TrackRecordPage />);
+    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
     expect(screen.getByTestId('empty-state')).toBeInTheDocument();
     expect(screen.getByText('No accuracy data yet')).toBeInTheDocument();
   });
@@ -63,7 +64,7 @@ describe('TrackRecordPage', () => {
       error: null,
     });
 
-    render(<TrackRecordPage />);
+    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
 
     const kpiSection = screen.getByTestId('kpi-section');
     expect(kpiSection).toBeInTheDocument();
@@ -94,7 +95,7 @@ describe('TrackRecordPage', () => {
       error: null,
     });
 
-    render(<TrackRecordPage />);
+    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
 
     expect(screen.queryByTestId('kpi-section')).not.toBeInTheDocument();
     // Table still renders
@@ -127,7 +128,7 @@ describe('TrackRecordPage', () => {
       error: null,
     });
 
-    render(<TrackRecordPage />);
+    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
 
     expect(screen.getByTestId('accuracy-table')).toBeInTheDocument();
     expect(screen.getByText('All Time')).toBeInTheDocument();
@@ -153,9 +154,10 @@ describe('TrackRecordPage', () => {
       error: null,
     });
 
-    render(<TrackRecordPage />);
+    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
 
     const dashes = screen.getAllByText('--');
     expect(dashes.length).toBeGreaterThanOrEqual(3);
   });
+
 });

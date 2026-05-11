@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 import WorldCup2026Layout from '../WorldCup2026Layout';
 import SchedulePage from '../SchedulePage';
 import LiveMatchPage from '../LiveMatchPage';
@@ -44,19 +45,21 @@ function makeFixture(id: number, statusShort: string): AFFixture {
 
 const renderLayout = (initialPath = '/football/world-cup-2026') =>
   render(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <Routes>
-        <Route path="/football/world-cup-2026" element={<WorldCup2026Layout />}>
-          <Route index element={<SchedulePage />} />
-          <Route path="live" element={<LiveMatchPage />} />
-          <Route path="track-record" element={<TrackRecordPage />} />
-        </Route>
-        <Route
-          path="/football/match/:fixtureId"
-          element={<div data-testid="match-page">Match</div>}
-        />
-      </Routes>
-    </MemoryRouter>,
+    <HelmetProvider>
+      <MemoryRouter initialEntries={[initialPath]}>
+        <Routes>
+          <Route path="/football/world-cup-2026" element={<WorldCup2026Layout />}>
+            <Route index element={<SchedulePage />} />
+            <Route path="live" element={<LiveMatchPage />} />
+            <Route path="track-record" element={<TrackRecordPage />} />
+          </Route>
+          <Route
+            path="/football/match/:fixtureId"
+            element={<div data-testid="match-page">Match</div>}
+          />
+        </Routes>
+      </MemoryRouter>
+    </HelmetProvider>,
   );
 
 describe('WorldCup2026Layout', () => {
@@ -157,5 +160,18 @@ describe('WorldCup2026Layout', () => {
       'true',
     );
     expect(screen.getByText('No accuracy data yet')).toBeInTheDocument();
+  });
+
+  describe.each([
+    ['/football/world-cup-2026', 'FIFA World Cup 2026 Schedule'],
+    ['/football/world-cup-2026/live', 'Live Matches'],
+    ['/football/world-cup-2026/track-record', 'Prediction Track Record'],
+  ])('title at %s', (path, expected) => {
+    test(`sets title containing "${expected}"`, async () => {
+      renderLayout(path);
+      await waitFor(() => {
+        expect(document.title).toContain(expected);
+      });
+    });
   });
 });

@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { Helmet } from 'react-helmet-async';
 import { Box, Typography, Button, Card, Skeleton } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useUpsets } from '../../football/hooks/useUpsets';
@@ -229,12 +230,20 @@ const UpsetsPage: React.FC = () => {
   }, []);
 
   return (
+    <>
+    <Helmet>
+      <title>Upset Watch — FIFA World Cup 2026 | FantasyFuel</title>
+      <meta name="description" content="Fixtures most likely to produce upsets at the FIFA World Cup 2026, ranked by upset index." />
+      <meta property="og:title" content="Upset Watch — FIFA World Cup 2026 | FantasyFuel" />
+      <meta property="og:description" content="Fixtures most likely to produce upsets at the FIFA World Cup 2026, ranked by upset index." />
+    </Helmet>
     <Box sx={{ maxWidth: 700, mx: 'auto', px: { xs: 1, sm: 2 }, py: 3 }}>
       <Typography variant="h4" sx={{ textAlign: 'center', mb: 3 }}>
         Upset Watch
       </Typography>
       <UpsetLoader key={retryKey} onRetry={handleRetry} />
     </Box>
+    </>
   );
 };
 

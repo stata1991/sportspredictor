@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 import MatchPage from '../MatchPage';
 import api from '../../../api';
 import { FULL_RESPONSE } from '../../../football/__fixtures__/sampleResponse';
@@ -27,15 +28,17 @@ jest.mock('../../../football/components/LiveMatchSection', () => {
 
 const renderMatchPage = (fixtureId = '1489369') =>
   render(
-    <MemoryRouter initialEntries={[`/football/match/${fixtureId}`]}>
-      <Routes>
-        <Route path="/football/match/:fixtureId" element={<MatchPage />} />
-        <Route
-          path="/football/world-cup-2026"
-          element={<div data-testid="fixtures-page">Fixtures</div>}
-        />
-      </Routes>
-    </MemoryRouter>,
+    <HelmetProvider>
+      <MemoryRouter initialEntries={[`/football/match/${fixtureId}`]}>
+        <Routes>
+          <Route path="/football/match/:fixtureId" element={<MatchPage />} />
+          <Route
+            path="/football/world-cup-2026"
+            element={<div data-testid="fixtures-page">Fixtures</div>}
+          />
+        </Routes>
+      </MemoryRouter>
+    </HelmetProvider>,
   );
 
 describe('MatchPage', () => {
@@ -223,6 +226,15 @@ describe('MatchPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('fixtures-page')).toBeInTheDocument();
+    });
+  });
+
+  test('sets dynamic page title with team names after fetch', async () => {
+    mockedApi.get.mockResolvedValueOnce({ data: FULL_RESPONSE });
+    renderMatchPage();
+
+    await waitFor(() => {
+      expect(document.title).toContain('Mexico vs South Africa Prediction');
     });
   });
 });

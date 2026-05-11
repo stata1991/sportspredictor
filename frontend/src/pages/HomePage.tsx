@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Helmet } from "react-helmet-async";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -44,6 +45,13 @@ const HomePage: React.FC = () => {
   };
 
   return (
+    <>
+    <Helmet>
+      <title>FantasyFuel — Predictions across match moments</title>
+      <meta name="description" content="AI-powered match predictions for FIFA World Cup 2026 — win probabilities, scoreline distributions, and upset alerts." />
+      <meta property="og:title" content="FantasyFuel — Predictions across match moments" />
+      <meta property="og:description" content="AI-powered match predictions for FIFA World Cup 2026 — win probabilities, scoreline distributions, and upset alerts." />
+    </Helmet>
     <Box
       sx={{
         position: "relative",
@@ -170,6 +178,7 @@ const HomePage: React.FC = () => {
         </Typography>
       </Box>
     </Box>
+    </>
   );
 };
 

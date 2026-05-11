@@ -1,7 +1,15 @@
 import React from 'react';
+import { Helmet } from 'react-helmet-async';
 import { Box, Typography } from '@mui/material';
 
 const PrivacyPage: React.FC = () => (
+  <>
+  <Helmet>
+    <title>Privacy Policy | FantasyFuel</title>
+    <meta name="description" content="FantasyFuel privacy policy — data collection, cookies, and third-party services." />
+    <meta property="og:title" content="Privacy Policy | FantasyFuel" />
+    <meta property="og:description" content="FantasyFuel privacy policy — data collection, cookies, and third-party services." />
+  </Helmet>
   <Box sx={{ maxWidth: 700, mx: 'auto', px: { xs: 2, sm: 3 }, py: 4 }}>
     <Typography
       variant="h4"
@@ -55,6 +63,7 @@ const PrivacyPage: React.FC = () => (
       </Typography>
     </Box>
   </Box>
+  </>
 );
 
 export default PrivacyPage;

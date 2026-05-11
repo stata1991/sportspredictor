@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Helmet } from 'react-helmet-async';
 import {
   Button,
   TextField,
@@ -59,6 +60,10 @@ const AuthPage: React.FC = () => {
 
   if (!firebaseEnabled) {
     return (
+      <>
+      <Helmet>
+        <title>Sign In | FantasyFuel</title>
+      </Helmet>
       <Container maxWidth="sm" sx={{ mt: 8, px: { xs: 1, sm: 2 } }}>
         <Paper
           elevation={10}
@@ -84,10 +89,15 @@ const AuthPage: React.FC = () => {
           </Typography>
         </Paper>
       </Container>
+      </>
     );
   }
 
   return (
+    <>
+    <Helmet>
+      <title>Sign In | FantasyFuel</title>
+    </Helmet>
     <Container maxWidth="sm" sx={{ mt: 8, px: { xs: 1, sm: 2 } }}> {/* Added responsive padding */}
       <Paper
         elevation={10}
@@ -193,6 +203,7 @@ const AuthPage: React.FC = () => {
         </Button>
       </Paper>
     </Container>
+    </>
   );
 };
 

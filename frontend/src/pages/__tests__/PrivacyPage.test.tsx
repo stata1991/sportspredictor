@@ -1,13 +1,26 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 import PrivacyPage from '../PrivacyPage';
 
-test('renders privacy page heading', () => {
+const renderPrivacy = () =>
   render(
-    <MemoryRouter>
-      <PrivacyPage />
-    </MemoryRouter>,
+    <HelmetProvider>
+      <MemoryRouter>
+        <PrivacyPage />
+      </MemoryRouter>
+    </HelmetProvider>,
   );
+
+test('renders privacy page heading', () => {
+  renderPrivacy();
   expect(screen.getByText('Privacy Policy')).toBeInTheDocument();
+});
+
+test('sets correct page title', async () => {
+  renderPrivacy();
+  await waitFor(() => {
+    expect(document.title).toContain('Privacy Policy | FantasyFuel');
+  });
 });

@@ -1,6 +1,8 @@
 import React from 'react';
 import { createRoot, hydrateRoot } from 'react-dom/client';
 import * as Sentry from '@sentry/react';
+import { HelmetProvider } from 'react-helmet-async';
+import 'flag-icons/css/flag-icons.min.css';
 import App from './App';
 import ErrorFallback from './components/ErrorFallback';
 import { ThemeProvider } from '@mui/material/styles';
@@ -20,10 +22,12 @@ const rootElement = document.getElementById('root') as HTMLElement;
 const app = (
   <React.StrictMode>
     <Sentry.ErrorBoundary fallback={<ErrorFallback />}>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <App />
-      </ThemeProvider>
+      <HelmetProvider>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <App />
+        </ThemeProvider>
+      </HelmetProvider>
     </Sentry.ErrorBoundary>
   </React.StrictMode>
 );

@@ -1,7 +1,15 @@
 import React from 'react';
+import { Helmet } from 'react-helmet-async';
 import { Box, Typography } from '@mui/material';
 
 const AboutPage: React.FC = () => (
+  <>
+  <Helmet>
+    <title>About | FantasyFuel</title>
+    <meta name="description" content="FantasyFuel.ai generates FIFA World Cup 2026 match predictions using a Dixon-Coles model and Claude AI reasoning." />
+    <meta property="og:title" content="About | FantasyFuel" />
+    <meta property="og:description" content="FantasyFuel.ai generates FIFA World Cup 2026 match predictions using a Dixon-Coles model and Claude AI reasoning." />
+  </Helmet>
   <Box sx={{ maxWidth: 700, mx: 'auto', px: { xs: 2, sm: 3 }, py: 4 }}>
     <Typography
       variant="h4"
@@ -46,6 +54,7 @@ const AboutPage: React.FC = () => (
       Entertainment only. Do not use for betting or gambling.
     </Typography>
   </Box>
+  </>
 );
 
 export default AboutPage;

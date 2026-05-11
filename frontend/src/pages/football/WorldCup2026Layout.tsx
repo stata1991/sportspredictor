@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
+import { Helmet } from 'react-helmet-async';
 import { Box, Typography, Tabs, Tab, keyframes } from '@mui/material';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useFixtures } from '../../football/hooks/useFixtures';
@@ -108,17 +109,46 @@ const FixtureProvider: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
   );
 };
 
+function useRouteMeta(pathname: string) {
+  if (pathname.startsWith(TAB_PATHS[2])) {
+    return {
+      title: 'Prediction Track Record — FIFA World Cup 2026 | FantasyFuel',
+      description: 'Aggregate accuracy and hit rate of our FIFA World Cup 2026 match predictions.',
+    };
+  }
+  if (pathname.startsWith(TAB_PATHS[1])) {
+    return {
+      title: 'Live Matches — FIFA World Cup 2026 | FantasyFuel',
+      description: 'Live win probability updates for in-play FIFA World Cup 2026 matches, refreshed every 60 seconds.',
+    };
+  }
+  return {
+    title: 'FIFA World Cup 2026 Schedule | FantasyFuel',
+    description: 'Full match schedule with pre-match win probabilities for the FIFA World Cup 2026, kicking off June 11.',
+  };
+}
+
 const WorldCup2026Layout: React.FC = () => {
   const [retryKey, setRetryKey] = useState(0);
   const handleRetry = useCallback(() => setRetryKey((k) => k + 1), []);
+  const location = useLocation();
+  const { title, description } = useRouteMeta(location.pathname);
 
   return (
-    <Box sx={{ maxWidth: 700, mx: 'auto', px: { xs: 1, sm: 2 }, py: 3 }}>
-      <Typography variant="h4" sx={{ textAlign: 'center', mb: 3 }}>
-        FIFA World Cup 2026
-      </Typography>
-      <FixtureProvider key={retryKey} onRetry={handleRetry} />
-    </Box>
+    <>
+      <Helmet>
+        <title>{title}</title>
+        <meta name="description" content={description} />
+        <meta property="og:title" content={title} />
+        <meta property="og:description" content={description} />
+      </Helmet>
+      <Box sx={{ maxWidth: 700, mx: 'auto', px: { xs: 1, sm: 2 }, py: 3 }}>
+        <Typography variant="h4" sx={{ textAlign: 'center', mb: 3 }}>
+          FIFA World Cup 2026
+        </Typography>
+        <FixtureProvider key={retryKey} onRetry={handleRetry} />
+      </Box>
+    </>
   );
 };
 

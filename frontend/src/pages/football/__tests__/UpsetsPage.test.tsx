@@ -1,7 +1,8 @@
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 import UpsetsPage from '../UpsetsPage';
 import { useUpsets } from '../../../football/hooks/useUpsets';
 
@@ -10,15 +11,17 @@ const mockedUseUpsets = useUpsets as jest.MockedFunction<typeof useUpsets>;
 
 const renderUpsetsPage = () =>
   render(
-    <MemoryRouter initialEntries={['/football/upsets']}>
-      <Routes>
-        <Route path="/football/upsets" element={<UpsetsPage />} />
-        <Route
-          path="/football/match/:fixtureId"
-          element={<div data-testid="match-page">Match</div>}
-        />
-      </Routes>
-    </MemoryRouter>,
+    <HelmetProvider>
+      <MemoryRouter initialEntries={['/football/upsets']}>
+        <Routes>
+          <Route path="/football/upsets" element={<UpsetsPage />} />
+          <Route
+            path="/football/match/:fixtureId"
+            element={<div data-testid="match-page">Match</div>}
+          />
+        </Routes>
+      </MemoryRouter>
+    </HelmetProvider>,
   );
 
 const makeUpset = (overrides: Partial<{
@@ -176,5 +179,13 @@ describe('UpsetsPage', () => {
     await userEvent.click(button);
 
     expect(screen.getByTestId('match-page')).toBeInTheDocument();
+  });
+
+  test('sets correct page title', async () => {
+    mockedUseUpsets.mockReturnValue({ upsets: [], loading: false, error: null });
+    renderUpsetsPage();
+    await waitFor(() => {
+      expect(document.title).toContain('Upset Watch');
+    });
   });
 });

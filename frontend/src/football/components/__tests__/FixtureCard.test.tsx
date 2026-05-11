@@ -79,20 +79,31 @@ describe('FixtureCard', () => {
     expect(handleClick).toHaveBeenCalledWith(42);
   });
 
-  test('renders without logo if logo is null (no broken image)', () => {
-    const fixture = makeFixture({ homeLogo: null, awayLogo: null });
+  test('renders CSS flags for known WC teams (no img elements)', () => {
+    const fixture = makeFixture({ homeName: 'USA', awayName: 'Brazil', homeLogo: null, awayLogo: null });
     render(<FixtureCard fixture={fixture} onClick={jest.fn()} />);
-    // No <img> elements should be present
+    // CSS flags render as <span> with role="img", not <img> elements
+    const flags = screen.getAllByTestId('team-flag');
+    expect(flags).toHaveLength(2);
+    expect(flags[0]).toHaveClass('fi', 'fi-us');
+    expect(flags[1]).toHaveClass('fi', 'fi-br');
+    // No <img> elements for flags
     const images = screen.queryAllByRole('img');
-    expect(images).toHaveLength(0);
+    const flagImgs = images.filter((el) => el.tagName === 'IMG');
+    expect(flagImgs).toHaveLength(0);
   });
 
-  test('renders logos when provided', () => {
+  test('falls back to logo img for unknown teams', () => {
     const fixture = makeFixture({
+      homeName: 'Atlantis FC',
+      awayName: 'Narnia United',
       homeLogo: 'https://example.com/home.png',
       awayLogo: 'https://example.com/away.png',
     });
     render(<FixtureCard fixture={fixture} onClick={jest.fn()} />);
+    // No CSS flags for unknown teams
+    expect(screen.queryAllByTestId('team-flag')).toHaveLength(0);
+    // Falls back to <img> logos
     const images = screen.getAllByRole('img');
     expect(images).toHaveLength(2);
     expect(images[0]).toHaveAttribute('src', 'https://example.com/home.png');

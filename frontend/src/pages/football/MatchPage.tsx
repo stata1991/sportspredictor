@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Helmet } from 'react-helmet-async';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Box, Typography, Button, CircularProgress } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -139,9 +140,19 @@ const MatchContent: React.FC<{
   }
 
   const completed = isCompleted(result.fixtureStatus ?? '');
+  const title = result.homeTeam && result.awayTeam
+    ? `${result.homeTeam} vs ${result.awayTeam} Prediction | FantasyFuel`
+    : 'Match Prediction | FantasyFuel';
 
   return (
     <>
+      <Helmet>
+        <title>{title}</title>
+        <meta property="og:title" content={title} />
+        {result.homeTeam && result.awayTeam && (
+          <meta property="og:description" content={`Win probability prediction for ${result.homeTeam} vs ${result.awayTeam} — FIFA World Cup 2026.`} />
+        )}
+      </Helmet>
       {completed && (
         <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
           <LiveBadge status={result.fixtureStatus!} />

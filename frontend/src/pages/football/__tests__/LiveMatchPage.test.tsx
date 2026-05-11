@@ -2,6 +2,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route, Outlet } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 import LiveMatchPage from '../LiveMatchPage';
 import { WorldCupOutletContext } from '../../../football/types/outletContext';
 import { AFFixture } from '../../../football/types/fixture';
@@ -56,13 +57,15 @@ const renderWithContext = (context: Partial<WorldCupOutletContext>) => {
 
   return {
     ...render(
-      <MemoryRouter initialEntries={['/test']}>
-        <Routes>
-          <Route path="/test" element={<ContextWrapper context={fullContext} />}>
-            <Route index element={<LiveMatchPage />} />
-          </Route>
-        </Routes>
-      </MemoryRouter>,
+      <HelmetProvider>
+        <MemoryRouter initialEntries={['/test']}>
+          <Routes>
+            <Route path="/test" element={<ContextWrapper context={fullContext} />}>
+              <Route index element={<LiveMatchPage />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </HelmetProvider>,
     ),
     context: fullContext,
   };
@@ -144,4 +147,5 @@ describe('LiveMatchPage', () => {
 
     expect(screen.getByTestId('live-label')).toHaveTextContent("LIVE 67'");
   });
+
 });

@@ -2,6 +2,7 @@ import React from 'react';
 import { Card, CardActionArea, Box, Typography, Chip } from '@mui/material';
 import { AFFixture } from '../types/fixture';
 import { colors } from '../colors';
+import { flagClass } from '../utils/countryFlag';
 
 interface FixtureCardProps {
   fixture: AFFixture;
@@ -84,14 +85,29 @@ const FixtureCard: React.FC<FixtureCardProps> = ({ fixture, onClick, badge }) =>
             >
               {teams.home.name}
             </Typography>
-            {teams.home.logo && (
-              <Box
-                component="img"
-                src={teams.home.logo}
-                alt={`${teams.home.name} logo`}
-                sx={{ width: 28, height: 28, flexShrink: 0 }}
-              />
-            )}
+            {(() => {
+              const fc = flagClass(teams.home.name);
+              if (fc) {
+                return (
+                  <Box
+                    component="span"
+                    className={fc}
+                    role="img"
+                    aria-label={`${teams.home.name} flag`}
+                    data-testid="team-flag"
+                    sx={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}
+                  />
+                );
+              }
+              return teams.home.logo ? (
+                <Box
+                  component="img"
+                  src={teams.home.logo}
+                  alt={`${teams.home.name} logo`}
+                  sx={{ width: 28, height: 28, flexShrink: 0 }}
+                />
+              ) : null;
+            })()}
           </Box>
 
           {/* Center: time / score / vs */}
@@ -151,14 +167,29 @@ const FixtureCard: React.FC<FixtureCardProps> = ({ fixture, onClick, badge }) =>
               minWidth: 0,
             }}
           >
-            {teams.away.logo && (
-              <Box
-                component="img"
-                src={teams.away.logo}
-                alt={`${teams.away.name} logo`}
-                sx={{ width: 28, height: 28, flexShrink: 0 }}
-              />
-            )}
+            {(() => {
+              const fc = flagClass(teams.away.name);
+              if (fc) {
+                return (
+                  <Box
+                    component="span"
+                    className={fc}
+                    role="img"
+                    aria-label={`${teams.away.name} flag`}
+                    data-testid="team-flag"
+                    sx={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}
+                  />
+                );
+              }
+              return teams.away.logo ? (
+                <Box
+                  component="img"
+                  src={teams.away.logo}
+                  alt={`${teams.away.name} logo`}
+                  sx={{ width: 28, height: 28, flexShrink: 0 }}
+                />
+              ) : null;
+            })()}
             <Typography
               variant="body1"
               sx={{
