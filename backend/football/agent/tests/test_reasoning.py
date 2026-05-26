@@ -328,7 +328,7 @@ class TestGenerateReasoningMocked:
         mock_football = AsyncMock()
         bundle = _make_bundle()
 
-        output = await generate_reasoning(
+        output, _cost = await generate_reasoning(
             agent_client=mock_agent,
             football_client=mock_football,
             bundle=bundle,
@@ -367,7 +367,7 @@ class TestGenerateReasoningMocked:
         mock_football = AsyncMock()
         bundle = _make_bundle()
 
-        output = await generate_reasoning(
+        output, _cost = await generate_reasoning(
             agent_client=mock_agent,
             football_client=mock_football,
             bundle=bundle,
@@ -400,7 +400,7 @@ class TestGenerateReasoningMocked:
         mock_football = AsyncMock()
         bundle = _make_bundle()
 
-        output = await generate_reasoning(
+        output, _cost = await generate_reasoning(
             agent_client=mock_agent,
             football_client=mock_football,
             bundle=bundle,
@@ -425,7 +425,7 @@ class TestGenerateReasoningMocked:
         mock_football = AsyncMock()
         bundle = _make_bundle()
 
-        output = await generate_reasoning(
+        output, _cost = await generate_reasoning(
             agent_client=mock_agent,
             football_client=mock_football,
             bundle=bundle,
@@ -449,7 +449,7 @@ class TestGenerateReasoningMocked:
         mock_football = AsyncMock()
         bundle = _make_bundle()
 
-        output = await generate_reasoning(
+        output, _cost = await generate_reasoning(
             agent_client=mock_agent,
             football_client=mock_football,
             bundle=bundle,
@@ -525,7 +525,7 @@ class TestRealAPIReasoning:
             cache=cache,
             singleflight=sf,
         ) as football_client:
-            output = await generate_reasoning(
+            output, _cost = await generate_reasoning(
                 agent_client=agent,
                 football_client=football_client,
                 bundle=bundle,

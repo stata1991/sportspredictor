@@ -124,7 +124,7 @@ class TestCostProfile:
                 )
 
                 t0 = time.monotonic()
-                output = await generate_reasoning(
+                output, _cost = await generate_reasoning(
                     agent_client=agent,
                     football_client=football_client,
                     bundle=bundle,

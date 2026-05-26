@@ -5,12 +5,14 @@ Mounted at ``/api/football`` by main.py.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.football._perf import timed_step
 from backend.football.agent.client import AnthropicAgentClient
 from backend.football.agent.reasoning import ReasoningOutput, generate_reasoning
 from backend.football.agent.upset import UpsetOutput, compute_upset_index
@@ -319,26 +321,27 @@ async def predict_pre_match(
     - Live status            -> 422 (use /predict/live/ instead)
     """
     # ── Fetch fixture from API ──────────────────────────────────
-    try:
-        fx = await client.get_fixture(fixture_id)
-    except APIFootballError as exc:
-        _raise_for_football_error(exc)
-
-    if fx is None:
-        raise HTTPException(404, f"Fixture {fixture_id} not found")
-
-    status = fx.fixture.status.short
-    home_id = fx.teams.home.id
-    away_id = fx.teams.away.id
-
-    # ── Check lineups for NS/TBD fixtures ───────────────────────
-    has_lineups = False
-    if status in ("NS", "TBD"):
+    with timed_step("fetch_fixture", fixture_id=fixture_id):
         try:
-            lineups = await client.get_lineups(fixture_id)
-            has_lineups = len(lineups) > 0
-        except APIFootballError:
-            pass  # proceed without lineup info
+            fx = await client.get_fixture(fixture_id)
+        except APIFootballError as exc:
+            _raise_for_football_error(exc)
+
+        if fx is None:
+            raise HTTPException(404, f"Fixture {fixture_id} not found")
+
+        status = fx.fixture.status.short
+        home_id = fx.teams.home.id
+        away_id = fx.teams.away.id
+
+        # ── Check lineups for NS/TBD fixtures ───────────────────
+        has_lineups = False
+        if status in ("NS", "TBD"):
+            try:
+                lineups = await client.get_lineups(fixture_id)
+                has_lineups = len(lineups) > 0
+            except APIFootballError:
+                pass  # proceed without lineup info
 
     # ── Detect stage ────────────────────────────────────────────
     stage = detect_stage(status, has_lineups=has_lineups)
@@ -403,8 +406,9 @@ async def predict_pre_match(
         }
 
     # ── Generate fresh predictions ──────────────────────────────
-    engine = _get_engine()
-    bundle = engine.predict(home_id, away_id, status, has_lineups=has_lineups)
+    with timed_step("dixon_coles", fixture_id=fixture_id):
+        engine = _get_engine()
+        bundle = engine.predict(home_id, away_id, status, has_lineups=has_lineups)
 
     # ── Persist deterministic predictions ─────────────────────
     # Commit BEFORE reasoning so agent failure can't roll back.
@@ -431,16 +435,27 @@ async def predict_pre_match(
             upset_payload = cached_r["upset_index"].payload
         else:
             try:
-                reasoning_output = await generate_reasoning(
-                    agent_client=agent_client,
-                    football_client=client,
-                    bundle=bundle,
-                    fixture_id=fixture_id,
-                    home_team=fx.teams.home.name,
-                    away_team=fx.teams.away.name,
-                    home_team_id=home_id,
-                    away_team_id=away_id,
-                )
+                with timed_step("anthropic_reasoning", fixture_id=fixture_id):
+                    reasoning_output, agent_cost = await generate_reasoning(
+                        agent_client=agent_client,
+                        football_client=client,
+                        bundle=bundle,
+                        fixture_id=fixture_id,
+                        home_team=fx.teams.home.name,
+                        away_team=fx.teams.away.name,
+                        home_team_id=home_id,
+                        away_team_id=away_id,
+                    )
+
+                logger.info(json.dumps({
+                    "event": "anthropic_usage",
+                    "fixture_id": fixture_id,
+                    "input_tokens": agent_cost.input_tokens,
+                    "cache_creation_input_tokens": agent_cost.cache_creation_input_tokens,
+                    "cache_read_input_tokens": agent_cost.cache_read_input_tokens,
+                    "output_tokens": agent_cost.output_tokens,
+                }))
+
                 upset_output = compute_upset_index(bundle, reasoning_output)
 
                 await save_reasoning_output(

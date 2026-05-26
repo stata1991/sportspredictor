@@ -117,7 +117,7 @@ async def generate_reasoning(
     away_team: str,
     home_team_id: int,
     away_team_id: int,
-) -> ReasoningOutput:
+) -> tuple[ReasoningOutput, AgentCostMetrics]:
     """Generate reasoning for a prediction bundle.
 
     Parameters
@@ -137,8 +137,8 @@ async def generate_reasoning(
 
     Returns
     -------
-    ReasoningOutput with validation_status indicating whether the output
-    passed all checks.
+    Tuple of (ReasoningOutput, AgentCostMetrics) — the cost metrics are
+    surfaced so the caller can log per-call token usage for diagnostics.
     """
     context = build_context(
         bundle, fixture_id, home_team, away_team,
@@ -221,4 +221,4 @@ async def generate_reasoning(
         generated_at=datetime.now(timezone.utc),
         validation_status=validation.status,
         cost_usd=cost.estimated_cost_usd,
-    )
+    ), cost

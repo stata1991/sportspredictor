@@ -588,7 +588,12 @@ class TestPredictPreMatchWithReasoning:
         mock_reasoning.upset_signals = []
         mock_reasoning.upset_paths = []
         mock_reasoning.validation_status = "valid"
-        mock_gen_reasoning.return_value = mock_reasoning
+        mock_cost = MagicMock()
+        mock_cost.input_tokens = 100
+        mock_cost.output_tokens = 50
+        mock_cost.cache_creation_input_tokens = 0
+        mock_cost.cache_read_input_tokens = 0
+        mock_gen_reasoning.return_value = (mock_reasoning, mock_cost)
 
         # Mock upset output.
         mock_upset = MagicMock()
