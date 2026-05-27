@@ -12,7 +12,7 @@ from typing import Any, NoReturn
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.football._perf import timed_step
+from backend.football._perf import _emit, timed_step
 from backend.football.agent.client import AnthropicAgentClient
 from backend.football.agent.prefetch import pre_fetch_match_context
 from backend.football.agent.reasoning import (
@@ -471,14 +471,14 @@ async def predict_pre_match(
                             away_team_id=away_id,
                         )
 
-                logger.info(json.dumps({
+                _emit({
                     "event": "anthropic_usage",
                     "fixture_id": fixture_id,
                     "input_tokens": agent_cost.input_tokens,
                     "cache_creation_input_tokens": agent_cost.cache_creation_input_tokens,
                     "cache_read_input_tokens": agent_cost.cache_read_input_tokens,
                     "output_tokens": agent_cost.output_tokens,
-                }))
+                })
 
                 upset_output = compute_upset_index(bundle, reasoning_output)
 
