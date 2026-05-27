@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     cricketdata_api_key: str | None = None
     environment: str = "development"
 
+    # When True, use pre-fetch + single-shot Anthropic call instead of
+    # multi-turn agent tool loop for reasoning generation.  Set to False
+    # via USE_SINGLE_SHOT_REASONING=false for fast rollback.
+    use_single_shot_reasoning: bool = True
+
     @field_validator("database_url", mode="before")
     @classmethod
     def _rewrite_pg_dialect(cls, v: str) -> str:

@@ -28,6 +28,7 @@ from backend.football.agent.client import (
     AnthropicAgentClient,
     ReasoningResult,
 )
+from backend.football.agent.prefetch import MatchContext
 from backend.football.data_provider import APIFootballClient
 from backend.football.predictions.schemas import PredictionBundle
 
@@ -200,6 +201,19 @@ async def generate_reasoning(
 
     total_tokens = cost.input_tokens + cost.output_tokens
 
+    return _wrap_result(result, cost, total_tokens, validation.status), cost
+
+
+# ── Result wrapper ──────────────────────────────────────────────────
+
+
+def _wrap_result(
+    result: ReasoningResult,
+    cost: AgentCostMetrics,
+    total_tokens: int,
+    validation_status: str,
+) -> ReasoningOutput:
+    """Convert a ReasoningResult (dataclass) to ReasoningOutput (Pydantic)."""
     return ReasoningOutput(
         paragraphs=result.paragraphs,
         claims=[
@@ -219,6 +233,38 @@ async def generate_reasoning(
         tokens_used=total_tokens,
         model_version=AGENT_MODEL,
         generated_at=datetime.now(timezone.utc),
-        validation_status=validation.status,
+        validation_status=validation_status,
         cost_usd=cost.estimated_cost_usd,
-    ), cost
+    )
+
+
+# ── Single-shot reasoning ──────────────────────────────────────────
+
+
+async def generate_reasoning_single_shot(
+    agent_client: AnthropicAgentClient,
+    context: MatchContext,
+) -> tuple[ReasoningOutput, AgentCostMetrics]:
+    """Generate reasoning via pre-fetched context + single API call.
+
+    Wraps the client's ReasoningResult into ReasoningOutput with
+    validation, producing the same return type as generate_reasoning()
+    so downstream code (save_reasoning_output, compute_upset_index)
+    works unchanged.
+    """
+    result, cost = await agent_client.generate_reasoning_single_shot(context)
+
+    validation = validate_reasoning(result.paragraphs, result.claims)
+
+    if not validation.is_valid:
+        logger.warning(
+            "Single-shot reasoning for fixture %d has validation_status=%s. "
+            "Violations: %s",
+            context.fixture_id,
+            validation.status,
+            validation.violations,
+        )
+
+    total_tokens = cost.input_tokens + cost.output_tokens
+
+    return _wrap_result(result, cost, total_tokens, validation.status), cost

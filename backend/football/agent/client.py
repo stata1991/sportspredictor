@@ -16,14 +16,17 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 import anthropic
 
+from backend.football.agent.prefetch import MatchContext
 from backend.football.agent.prompts import (
     REASONING_SYSTEM_PROMPT,
     REASONING_USER_TEMPLATE,
+    SINGLE_SHOT_SYSTEM_PROMPT,
+    SINGLE_SHOT_USER_TEMPLATE,
 )
 from backend.football.agent.tools import (
     TOOL_DEFINITIONS,
@@ -266,6 +269,76 @@ class AnthropicAgentClient:
         raise AgentMaxTurnsError(
             f"Agent did not produce final output within {MAX_TOOL_TURNS} turns"
         )
+
+    async def generate_reasoning_single_shot(
+        self,
+        context: MatchContext,
+    ) -> tuple[ReasoningResult, AgentCostMetrics]:
+        """Single-shot reasoning with all data pre-fetched.
+
+        Unlike generate_reasoning() which runs a multi-turn tool-use loop,
+        this makes exactly ONE Anthropic API call with all match data
+        inlined in the user message.  No tools, no loop.
+
+        Parameters
+        ----------
+        context:
+            Pre-fetched MatchContext from pre_fetch_match_context().
+
+        Returns
+        -------
+        Tuple of (ReasoningResult, AgentCostMetrics).
+
+        Raises
+        ------
+        AgentError
+            On unrecoverable API errors.
+        AgentParseError
+            If the response is not valid JSON matching the schema.
+        """
+        t0 = time.monotonic()
+        cost = AgentCostMetrics()
+
+        user_message = SINGLE_SHOT_USER_TEMPLATE.format(**asdict(context))
+
+        system_with_cache = [
+            {
+                "type": "text",
+                "text": SINGLE_SHOT_SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+        messages: list[dict[str, Any]] = [
+            {"role": "user", "content": user_message},
+        ]
+
+        cost.total_turns = 1
+
+        response = self._call_api(
+            system=system_with_cache,
+            messages=messages,
+            tools=[],
+        )
+
+        # Accumulate token usage.
+        usage = response.usage
+        cost.input_tokens = usage.input_tokens
+        cost.output_tokens = usage.output_tokens
+        if hasattr(usage, "cache_creation_input_tokens"):
+            cost.cache_creation_input_tokens = (
+                usage.cache_creation_input_tokens or 0
+            )
+        if hasattr(usage, "cache_read_input_tokens"):
+            cost.cache_read_input_tokens = (
+                usage.cache_read_input_tokens or 0
+            )
+
+        raw_text = self._extract_text(response)
+        cost.elapsed_seconds = time.monotonic() - t0
+        self._log_cost(cost, context.fixture_id)
+
+        return self._parse_result(raw_text), cost
 
     def _call_api(
         self,

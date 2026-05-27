@@ -14,7 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.football._perf import timed_step
 from backend.football.agent.client import AnthropicAgentClient
-from backend.football.agent.reasoning import ReasoningOutput, generate_reasoning
+from backend.football.agent.prefetch import pre_fetch_match_context
+from backend.football.agent.reasoning import (
+    ReasoningOutput,
+    generate_reasoning,
+    generate_reasoning_single_shot,
+)
 from backend.football.agent.upset import UpsetOutput, compute_upset_index
 from backend.football.constants import BASE_URL, WC_LEAGUE_ID, WC_SEASON
 from backend.football.data_provider import APIFootballClient
@@ -48,6 +53,7 @@ from backend.football.predictions.engine import (
 from backend.football.predictions.schemas import FixtureStage
 from backend.football.schemas import CoverageStatus
 from backend.shared.db import get_session
+from backend.shared.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -435,17 +441,35 @@ async def predict_pre_match(
             upset_payload = cached_r["upset_index"].payload
         else:
             try:
-                with timed_step("anthropic_reasoning", fixture_id=fixture_id):
-                    reasoning_output, agent_cost = await generate_reasoning(
-                        agent_client=agent_client,
-                        football_client=client,
-                        bundle=bundle,
-                        fixture_id=fixture_id,
-                        home_team=fx.teams.home.name,
-                        away_team=fx.teams.away.name,
-                        home_team_id=home_id,
-                        away_team_id=away_id,
-                    )
+                settings = get_settings()
+                if settings.use_single_shot_reasoning:
+                    with timed_step("pre_fetch_context", fixture_id=fixture_id):
+                        ctx = await pre_fetch_match_context(
+                            client=client,
+                            fixture_id=fixture_id,
+                            home_team=fx.teams.home.name,
+                            away_team=fx.teams.away.name,
+                            home_team_id=home_id,
+                            away_team_id=away_id,
+                            bundle=bundle,
+                        )
+                    with timed_step("anthropic_reasoning", fixture_id=fixture_id):
+                        reasoning_output, agent_cost = await generate_reasoning_single_shot(
+                            agent_client=agent_client,
+                            context=ctx,
+                        )
+                else:
+                    with timed_step("anthropic_reasoning", fixture_id=fixture_id):
+                        reasoning_output, agent_cost = await generate_reasoning(
+                            agent_client=agent_client,
+                            football_client=client,
+                            bundle=bundle,
+                            fixture_id=fixture_id,
+                            home_team=fx.teams.home.name,
+                            away_team=fx.teams.away.name,
+                            home_team_id=home_id,
+                            away_team_id=away_id,
+                        )
 
                 logger.info(json.dumps({
                     "event": "anthropic_usage",

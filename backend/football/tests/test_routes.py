@@ -557,6 +557,7 @@ class TestPredictPreMatchWithReasoning:
         mock_engine_fn.return_value = mock_engine
         return mock_bundle
 
+    @patch("backend.football.routes.get_settings")
     @patch("backend.football.routes.compute_upset_index")
     @patch("backend.football.routes.generate_reasoning")
     @patch("backend.football.routes.save_upset_output")
@@ -575,10 +576,16 @@ class TestPredictPreMatchWithReasoning:
         mock_save_upset,
         mock_gen_reasoning,
         mock_compute_upset,
+        mock_get_settings,
     ):
         self._setup_fresh_prediction(mock_engine_fn, mock_cache_fn)
         mock_save_bundle.return_value = []
         mock_cache_reasoning_fn.return_value = None
+
+        # Force agent-loop path for this test.
+        mock_settings = MagicMock()
+        mock_settings.use_single_shot_reasoning = False
+        mock_get_settings.return_value = mock_settings
 
         # Mock reasoning output.
         mock_reasoning = MagicMock()
@@ -625,6 +632,7 @@ class TestPredictPreMatchWithReasoning:
         # Two commits: one for deterministic, one for reasoning+upset.
         assert self.mock_session.commit.await_count == 2
 
+    @patch("backend.football.routes.get_settings")
     @patch("backend.football.routes.generate_reasoning")
     @patch("backend.football.routes.save_prediction_bundle")
     @patch("backend.football.routes.get_cached_reasoning")
@@ -637,10 +645,16 @@ class TestPredictPreMatchWithReasoning:
         mock_cache_reasoning_fn,
         mock_save_bundle,
         mock_gen_reasoning,
+        mock_get_settings,
     ):
         self._setup_fresh_prediction(mock_engine_fn, mock_cache_fn)
         mock_save_bundle.return_value = []
         mock_cache_reasoning_fn.return_value = None
+
+        # Force agent-loop path for this test.
+        mock_settings = MagicMock()
+        mock_settings.use_single_shot_reasoning = False
+        mock_get_settings.return_value = mock_settings
 
         # Agent blows up.
         mock_gen_reasoning.side_effect = RuntimeError("Anthropic API down")
@@ -1061,4 +1075,311 @@ class TestListUpsets:
         assert resp.status_code == 200
         mock_get_upsets.assert_awaited_once_with(
             self.mock_session, 0.45
+        )
+
+
+# ── Single-shot feature flag tests ────────────────────────────────
+
+
+class TestSingleShotFeatureFlag:
+    """Verify USE_SINGLE_SHOT_REASONING flag routes to the correct path."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_deps(self):
+        self.mock_client = AsyncMock()
+        self.mock_session = AsyncMock()
+        self.mock_session.commit = AsyncMock()
+        self.mock_agent = MagicMock()
+
+        async def _override_client():
+            return self.mock_client
+
+        async def _override_session():
+            return self.mock_session
+
+        def _override_agent():
+            return self.mock_agent
+
+        _app.dependency_overrides.clear()
+        from backend.football.deps import get_agent_client, get_football_client
+        from backend.shared.db import get_session
+
+        _app.dependency_overrides[get_football_client] = _override_client
+        _app.dependency_overrides[get_session] = _override_session
+        _app.dependency_overrides[get_agent_client] = _override_agent
+
+        yield
+        _app.dependency_overrides.clear()
+
+    def _setup_fresh_prediction(self, mock_engine_fn, mock_cache_fn):
+        """Common setup: NS fixture, no cache, mock engine."""
+        fx = _make_fixture()
+        self.mock_client.get_fixture = AsyncMock(return_value=fx)
+        self.mock_client.get_lineups = AsyncMock(return_value=[])
+        mock_cache_fn.return_value = None
+
+        mock_engine = MagicMock()
+        mock_bundle = MagicMock()
+        mock_bundle.stage.value = "pre_lineup"
+        mock_bundle.model_version = "dixon_coles_v1"
+        mock_bundle.confidence = "normal"
+        mock_bundle.winner.model_dump.return_value = {"p_home_win": 0.4}
+        mock_bundle.total_goals.model_dump.return_value = {"over_2_5": 0.5}
+        mock_bundle.ht_score.model_dump.return_value = {"p_draw": 0.3}
+        mock_bundle.first_to_score.model_dump.return_value = {
+            "p_home_first": 0.5
+        }
+        mock_engine.predict.return_value = mock_bundle
+        mock_engine_fn.return_value = mock_engine
+        return mock_bundle
+
+    def _mock_reasoning_output(self):
+        """Build a mock ReasoningOutput for both paths."""
+        mock_reasoning = MagicMock()
+        mock_reasoning.paragraphs = ["P1.", "P2.", "P3."]
+        mock_reasoning.claims = []
+        mock_reasoning.upset_index = 0.40
+        mock_reasoning.upset_signals = []
+        mock_reasoning.upset_paths = []
+        mock_reasoning.validation_status = "valid"
+        mock_cost = MagicMock()
+        mock_cost.input_tokens = 100
+        mock_cost.output_tokens = 50
+        mock_cost.cache_creation_input_tokens = 0
+        mock_cost.cache_read_input_tokens = 0
+        return mock_reasoning, mock_cost
+
+    def _mock_upset_output(self):
+        """Build a mock UpsetOutput."""
+        mock_upset = MagicMock()
+        mock_upset.upset_index = 0.28
+        mock_upset.deterministic_component = 0.22
+        mock_upset.agent_component = 0.40
+        mock_upset.bounded_agent = 0.37
+        mock_upset.upset_signals = []
+        mock_upset.upset_paths = []
+        return mock_upset
+
+    @patch("backend.football.routes.get_settings")
+    @patch("backend.football.routes.compute_upset_index")
+    @patch("backend.football.routes.generate_reasoning_single_shot")
+    @patch("backend.football.routes.pre_fetch_match_context")
+    @patch("backend.football.routes.generate_reasoning")
+    @patch("backend.football.routes.save_upset_output")
+    @patch("backend.football.routes.save_reasoning_output")
+    @patch("backend.football.routes.save_prediction_bundle")
+    @patch("backend.football.routes.get_cached_reasoning")
+    @patch("backend.football.routes.get_cached_bundle")
+    @patch("backend.football.routes._get_engine")
+    async def test_flag_on_calls_single_shot_path(
+        self,
+        mock_engine_fn,
+        mock_cache_fn,
+        mock_cache_reasoning_fn,
+        mock_save_bundle,
+        mock_save_reasoning,
+        mock_save_upset,
+        mock_gen_reasoning,
+        mock_prefetch,
+        mock_gen_single_shot,
+        mock_compute_upset,
+        mock_get_settings,
+    ):
+        """Flag ON: pre_fetch + single_shot called; agent loop NOT called."""
+        self._setup_fresh_prediction(mock_engine_fn, mock_cache_fn)
+        mock_save_bundle.return_value = []
+        mock_cache_reasoning_fn.return_value = None
+
+        # Configure settings mock: flag ON.
+        mock_settings = MagicMock()
+        mock_settings.use_single_shot_reasoning = True
+        mock_get_settings.return_value = mock_settings
+
+        # Mock pre-fetch.
+        mock_ctx = MagicMock()
+        mock_prefetch.return_value = mock_ctx
+
+        # Mock single-shot reasoning.
+        mock_reasoning, mock_cost = self._mock_reasoning_output()
+        mock_gen_single_shot.return_value = (mock_reasoning, mock_cost)
+
+        # Mock upset.
+        mock_compute_upset.return_value = self._mock_upset_output()
+        mock_save_reasoning.return_value = MagicMock()
+        mock_save_upset.return_value = MagicMock()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/pre-match/100")
+
+        assert resp.status_code == 200
+        body = resp.json()
+
+        # Single-shot path was called.
+        mock_prefetch.assert_awaited_once()
+        mock_gen_single_shot.assert_awaited_once()
+
+        # Agent loop was NOT called.
+        mock_gen_reasoning.assert_not_awaited()
+
+        # Response has reasoning.
+        assert body["reasoning"] is not None
+        assert body["reasoning"]["paragraphs"] == ["P1.", "P2.", "P3."]
+
+    @patch("backend.football.routes.get_settings")
+    @patch("backend.football.routes.compute_upset_index")
+    @patch("backend.football.routes.generate_reasoning_single_shot")
+    @patch("backend.football.routes.pre_fetch_match_context")
+    @patch("backend.football.routes.generate_reasoning")
+    @patch("backend.football.routes.save_upset_output")
+    @patch("backend.football.routes.save_reasoning_output")
+    @patch("backend.football.routes.save_prediction_bundle")
+    @patch("backend.football.routes.get_cached_reasoning")
+    @patch("backend.football.routes.get_cached_bundle")
+    @patch("backend.football.routes._get_engine")
+    async def test_flag_off_calls_agent_loop(
+        self,
+        mock_engine_fn,
+        mock_cache_fn,
+        mock_cache_reasoning_fn,
+        mock_save_bundle,
+        mock_save_reasoning,
+        mock_save_upset,
+        mock_gen_reasoning,
+        mock_prefetch,
+        mock_gen_single_shot,
+        mock_compute_upset,
+        mock_get_settings,
+    ):
+        """Flag OFF: agent loop called; pre_fetch + single_shot NOT called."""
+        self._setup_fresh_prediction(mock_engine_fn, mock_cache_fn)
+        mock_save_bundle.return_value = []
+        mock_cache_reasoning_fn.return_value = None
+
+        # Configure settings mock: flag OFF.
+        mock_settings = MagicMock()
+        mock_settings.use_single_shot_reasoning = False
+        mock_get_settings.return_value = mock_settings
+
+        # Mock agent loop reasoning.
+        mock_reasoning, mock_cost = self._mock_reasoning_output()
+        mock_gen_reasoning.return_value = (mock_reasoning, mock_cost)
+
+        # Mock upset.
+        mock_compute_upset.return_value = self._mock_upset_output()
+        mock_save_reasoning.return_value = MagicMock()
+        mock_save_upset.return_value = MagicMock()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/pre-match/100")
+
+        assert resp.status_code == 200
+        body = resp.json()
+
+        # Agent loop was called.
+        mock_gen_reasoning.assert_awaited_once()
+
+        # Single-shot path was NOT called.
+        mock_prefetch.assert_not_awaited()
+        mock_gen_single_shot.assert_not_awaited()
+
+        # Response has reasoning.
+        assert body["reasoning"] is not None
+        assert body["reasoning"]["paragraphs"] == ["P1.", "P2.", "P3."]
+
+    @patch("backend.football.routes.get_settings")
+    @patch("backend.football.routes.compute_upset_index")
+    @patch("backend.football.routes.generate_reasoning_single_shot")
+    @patch("backend.football.routes.pre_fetch_match_context")
+    @patch("backend.football.routes.generate_reasoning")
+    @patch("backend.football.routes.save_upset_output")
+    @patch("backend.football.routes.save_reasoning_output")
+    @patch("backend.football.routes.save_prediction_bundle")
+    @patch("backend.football.routes.get_cached_reasoning")
+    @patch("backend.football.routes.get_cached_bundle")
+    @patch("backend.football.routes._get_engine")
+    async def test_both_flags_produce_equivalent_response_shape(
+        self,
+        mock_engine_fn,
+        mock_cache_fn,
+        mock_cache_reasoning_fn,
+        mock_save_bundle,
+        mock_save_reasoning,
+        mock_save_upset,
+        mock_gen_reasoning,
+        mock_prefetch,
+        mock_gen_single_shot,
+        mock_compute_upset,
+        mock_get_settings,
+    ):
+        """Both flag states produce structurally equivalent JSON responses."""
+        responses = {}
+
+        for flag_value in (True, False):
+            self._setup_fresh_prediction(mock_engine_fn, mock_cache_fn)
+            mock_save_bundle.return_value = []
+            mock_cache_reasoning_fn.return_value = None
+
+            mock_settings = MagicMock()
+            mock_settings.use_single_shot_reasoning = flag_value
+            mock_get_settings.return_value = mock_settings
+
+            mock_reasoning, mock_cost = self._mock_reasoning_output()
+
+            if flag_value:
+                mock_ctx = MagicMock()
+                mock_prefetch.return_value = mock_ctx
+                mock_gen_single_shot.return_value = (
+                    mock_reasoning,
+                    mock_cost,
+                )
+            else:
+                mock_gen_reasoning.return_value = (
+                    mock_reasoning,
+                    mock_cost,
+                )
+
+            mock_compute_upset.return_value = self._mock_upset_output()
+            mock_save_reasoning.return_value = MagicMock()
+            mock_save_upset.return_value = MagicMock()
+
+            # Reset commit mock for clean count.
+            self.mock_session.commit.reset_mock()
+
+            async with AsyncClient(
+                transport=ASGITransport(app=_app), base_url="http://test"
+            ) as ac:
+                resp = await ac.get(
+                    "/api/football/predict/pre-match/100"
+                )
+
+            assert resp.status_code == 200
+            responses[flag_value] = resp.json()
+
+        # Both responses have the same top-level keys.
+        assert set(responses[True].keys()) == set(responses[False].keys())
+
+        # Both have identical structure for key fields.
+        for key in (
+            "fixture_id",
+            "home_team",
+            "away_team",
+            "status",
+            "stage",
+            "cached",
+        ):
+            assert responses[True][key] == responses[False][key]
+
+        # Both have reasoning and upset payloads.
+        assert responses[True]["reasoning"] is not None
+        assert responses[False]["reasoning"] is not None
+        assert responses[True]["upset"] is not None
+        assert responses[False]["upset"] is not None
+
+        # Both reasoning payloads have the same keys.
+        assert set(responses[True]["reasoning"].keys()) == set(
+            responses[False]["reasoning"].keys()
         )
