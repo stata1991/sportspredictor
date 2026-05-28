@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     # requests with 503 (fail-closed).
     prewarm_api_key: str | None = None
 
+    # In-process pre-warm scheduler.  When enabled, an asyncio loop
+    # fires _warm_fixtures_background on startup, then every
+    # PREWARM_INTERVAL_SECONDS.  Set PREWARM_SCHEDULER_ENABLED=true
+    # in EB env to activate; kill via env var without a code deploy.
+    prewarm_scheduler_enabled: bool = False
+    prewarm_interval_seconds: int = 900
+
     @field_validator("database_url", mode="before")
     @classmethod
     def _rewrite_pg_dialect(cls, v: str) -> str:

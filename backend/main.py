@@ -1,3 +1,6 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,10 +56,27 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
 
 IPL_SERIES_ID = int(os.getenv("IPL_SERIES_ID", "9237"))
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """App lifespan: start background scheduler on startup, cancel on shutdown."""
+    from backend.football.scheduler import start_scheduler
+
+    scheduler_task = await start_scheduler()
+    yield
+    if scheduler_task is not None:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+
+
 app = FastAPI(
     title="FantasyFuel API",
     description="Multi-sport prediction platform",
     version="0.2.0",
+    lifespan=lifespan,
 )
 router = APIRouter(prefix="/api")
 
