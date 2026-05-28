@@ -7,9 +7,14 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
+import time
+import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Response
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.football._perf import _emit, timed_step
@@ -52,7 +57,7 @@ from backend.football.predictions.engine import (
 )
 from backend.football.predictions.schemas import FixtureStage
 from backend.football.schemas import CoverageStatus
-from backend.shared.db import get_session
+from backend.shared.db import AsyncSessionLocal, get_session
 from backend.shared.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -750,4 +755,296 @@ async def get_accuracy(
             }
             for r in rollups
         ],
+    }
+
+
+# ── Pre-warm admin endpoint ──────────────────────────────────────────
+
+_PREWARM_MAX_FIXTURES = 8
+
+
+class PrewarmRequest(BaseModel):
+    window_start_minutes: int = 90
+    window_end_minutes: int = 150
+    dry_run: bool = False
+
+
+async def _verify_prewarm_key(
+    authorization: str = Header(default=""),
+) -> None:
+    """Validate Bearer token for the pre-warm endpoint.
+
+    Fail-closed: rejects with 503 if no key is configured, 401 if
+    the header is missing/malformed, 403 if the key doesn't match.
+    Uses ``secrets.compare_digest`` for timing-safe comparison.
+    """
+    settings = get_settings()
+    if not settings.prewarm_api_key:
+        _emit({
+            "event": "prewarm_auth",
+            "status": "key_not_configured",
+        })
+        raise HTTPException(503, "Pre-warm API key not configured")
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(401, "Missing or malformed Authorization header")
+
+    token = authorization[len("Bearer "):]
+    if not secrets.compare_digest(token, settings.prewarm_api_key):
+        raise HTTPException(403, "Invalid pre-warm API key")
+
+
+async def _warm_fixtures_background(
+    tick_id: str,
+    window_start: datetime,
+    window_end: datetime,
+    dry_run: bool,
+) -> None:
+    """Background task: discover and warm fixtures in the kickoff window.
+
+    Runs after the HTTP response is sent.  Uses its own DB session
+    and API-Football client (the request-scoped ones are closed).
+    """
+    settings = get_settings()
+    results: list[dict[str, Any]] = []
+    counts = {
+        "fixtures_in_window": 0,
+        "already_warm": 0,
+        "attempted": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "skipped_dry_run": 0,
+    }
+
+    try:
+        # ── Build clients for background work ─────────────────────
+        if not settings.api_football_key:
+            _emit({
+                "event": "prewarm_tick",
+                "tick_id": tick_id,
+                "error": "API_FOOTBALL_KEY not configured",
+                **counts,
+                "results": results,
+            })
+            return
+
+        from backend.cache import cache as _cache_singleton
+        from backend.shared.async_singleflight import AsyncSingleflight
+
+        sf = AsyncSingleflight()
+
+        async with APIFootballClient(
+            settings.api_football_key, _cache_singleton, sf,
+        ) as client:
+            # ── Discover fixtures in window ───────────────────────
+            all_fixtures = await client.get_fixtures(
+                league=WC_LEAGUE_ID, season=WC_SEASON,
+            )
+
+            upcoming = []
+            for fx in all_fixtures:
+                ko = fx.fixture.date
+                if ko.tzinfo is None:
+                    ko = ko.replace(tzinfo=timezone.utc)
+                if window_start <= ko <= window_end:
+                    status = fx.fixture.status.short
+                    if status in ("NS", "TBD"):
+                        upcoming.append(fx)
+
+            # Sort by soonest kickoff, cap at 8
+            upcoming.sort(key=lambda f: f.fixture.date)
+            upcoming = upcoming[:_PREWARM_MAX_FIXTURES]
+            counts["fixtures_in_window"] = len(upcoming)
+
+            # ── Warm each fixture sequentially ────────────────────
+            for fx in upcoming:
+                fixture_id = fx.fixture.id
+                home_team = fx.teams.home.name
+                away_team = fx.teams.away.name
+                home_id = fx.teams.home.id
+                away_id = fx.teams.away.id
+                ko_iso = fx.fixture.date.isoformat()
+                status = fx.fixture.status.short
+
+                async with AsyncSessionLocal() as session:
+                    try:
+                        # ── Lineup check + stage detection ────────
+                        has_lineups = False
+                        if status in ("NS", "TBD"):
+                            try:
+                                lineups = await client.get_lineups(fixture_id)
+                                has_lineups = len(lineups) > 0
+                            except Exception:
+                                pass
+
+                        stage = detect_stage(status, has_lineups=has_lineups)
+
+                        # ── Idempotency check ─────────────────────
+                        cached_bundle = await get_cached_bundle(
+                            session, fixture_id, stage.value,
+                        )
+                        cached_reasoning = await get_cached_reasoning(
+                            session, fixture_id, stage.value,
+                        )
+                        if cached_bundle is not None and cached_reasoning is not None:
+                            results.append({
+                                "fixture_id": fixture_id,
+                                "home_team": home_team,
+                                "away_team": away_team,
+                                "kickoff": ko_iso,
+                                "status": "already_warm",
+                            })
+                            counts["already_warm"] += 1
+                            continue
+
+                        # ── dry_run: stop before LLM calls ────────
+                        if dry_run:
+                            results.append({
+                                "fixture_id": fixture_id,
+                                "home_team": home_team,
+                                "away_team": away_team,
+                                "kickoff": ko_iso,
+                                "status": "skipped_dry_run",
+                            })
+                            counts["skipped_dry_run"] += 1
+                            continue
+
+                        counts["attempted"] += 1
+                        t0 = time.monotonic()
+
+                        # ── Generate predictions (same path as predict_pre_match) ──
+                        engine = _get_engine()
+                        bundle = engine.predict(
+                            home_id, away_id, status, has_lineups=has_lineups,
+                        )
+                        await save_prediction_bundle(session, fixture_id, bundle)
+                        await session.commit()
+
+                        # ── Reasoning (single-shot path) ──────────
+                        agent_client = None
+                        if settings.anthropic_api_key:
+                            agent_client = AnthropicAgentClient(
+                                api_key=settings.anthropic_api_key,
+                            )
+
+                        if agent_client is not None:
+                            with timed_step("pre_fetch_context", fixture_id=fixture_id):
+                                ctx = await pre_fetch_match_context(
+                                    client=client,
+                                    fixture_id=fixture_id,
+                                    home_team=home_team,
+                                    away_team=away_team,
+                                    home_team_id=home_id,
+                                    away_team_id=away_id,
+                                    bundle=bundle,
+                                )
+                            with timed_step("anthropic_reasoning", fixture_id=fixture_id):
+                                reasoning_output, agent_cost = (
+                                    await generate_reasoning_single_shot(
+                                        agent_client=agent_client,
+                                        context=ctx,
+                                    )
+                                )
+
+                            _emit({
+                                "event": "anthropic_usage",
+                                "fixture_id": fixture_id,
+                                "source": "prewarm",
+                                "input_tokens": agent_cost.input_tokens,
+                                "cache_creation_input_tokens": agent_cost.cache_creation_input_tokens,
+                                "cache_read_input_tokens": agent_cost.cache_read_input_tokens,
+                                "output_tokens": agent_cost.output_tokens,
+                            })
+
+                            upset_output = compute_upset_index(bundle, reasoning_output)
+
+                            await save_reasoning_output(
+                                session, fixture_id, reasoning_output, stage.value,
+                            )
+                            await save_upset_output(
+                                session, fixture_id, upset_output, stage.value,
+                            )
+                            await session.commit()
+
+                        duration_ms = round((time.monotonic() - t0) * 1000, 1)
+                        results.append({
+                            "fixture_id": fixture_id,
+                            "home_team": home_team,
+                            "away_team": away_team,
+                            "kickoff": ko_iso,
+                            "status": "warmed",
+                            "duration_ms": duration_ms,
+                        })
+                        counts["succeeded"] += 1
+
+                    except Exception as exc:
+                        logger.exception(
+                            "Pre-warm failed for fixture %d", fixture_id,
+                        )
+                        results.append({
+                            "fixture_id": fixture_id,
+                            "home_team": home_team,
+                            "away_team": away_team,
+                            "kickoff": ko_iso,
+                            "status": "failed",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        })
+                        counts["failed"] += 1
+
+    except Exception as exc:
+        logger.exception("Pre-warm tick failed globally")
+        _emit({
+            "event": "prewarm_tick",
+            "tick_id": tick_id,
+            "error": f"{type(exc).__name__}: {exc}",
+            **counts,
+            "results": results,
+        })
+        return
+
+    _emit({
+        "event": "prewarm_tick",
+        "tick_id": tick_id,
+        "window": {
+            "start": window_start.isoformat(),
+            "end": window_end.isoformat(),
+        },
+        "dry_run": dry_run,
+        **counts,
+        "results": results,
+    })
+
+
+@router.post("/admin/prewarm/upcoming")
+async def prewarm_upcoming(
+    body: PrewarmRequest,
+    background_tasks: BackgroundTasks,
+    _auth: None = Depends(_verify_prewarm_key),
+) -> dict:
+    """Trigger pre-warming of upcoming fixtures.
+
+    Returns immediately with an ack.  Fixture warming runs in a
+    background task after the response is sent.
+    """
+    now = datetime.now(timezone.utc)
+    window_start = now + timedelta(minutes=body.window_start_minutes)
+    window_end = now + timedelta(minutes=body.window_end_minutes)
+    tick_id = str(uuid.uuid4())
+
+    background_tasks.add_task(
+        _warm_fixtures_background,
+        tick_id=tick_id,
+        window_start=window_start,
+        window_end=window_end,
+        dry_run=body.dry_run,
+    )
+
+    return {
+        "tick_id": tick_id,
+        "accepted": True,
+        "dry_run": body.dry_run,
+        "window": {
+            "start": window_start.isoformat(),
+            "end": window_end.isoformat(),
+        },
     }

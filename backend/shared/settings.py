@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     # via USE_SINGLE_SHOT_REASONING=false for fast rollback.
     use_single_shot_reasoning: bool = True
 
+    # Bearer token for the /admin/prewarm/upcoming endpoint.  Set via
+    # PREWARM_API_KEY env var.  If unset, the endpoint rejects all
+    # requests with 503 (fail-closed).
+    prewarm_api_key: str | None = None
+
     @field_validator("database_url", mode="before")
     @classmethod
     def _rewrite_pg_dialect(cls, v: str) -> str:
