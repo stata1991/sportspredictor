@@ -209,6 +209,82 @@ class AFLeagueWithSeasons(BaseModel):
     seasons: list[AFLeagueSeason] = []
 
 
+# ── Standings ─────────────────────────────────────────────────────────
+
+
+class AFStandingTeam(BaseModel):
+    """Team reference inside a standings entry."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str
+    logo: str | None = None
+
+
+class AFStandingGoals(BaseModel):
+    """Goals for/against in standings stats."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    # API-Football uses "for" as key, which is a Python reserved word
+    goals_for: int = Field(0, alias="for")
+    against: int = 0
+
+
+class AFStandingStats(BaseModel):
+    """Win/draw/lose breakdown in standings (all, home, or away)."""
+
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+
+    played: int = 0
+    win: int = 0
+    draw: int = 0
+    lose: int = 0
+    goals: AFStandingGoals = Field(default_factory=AFStandingGoals)
+
+
+class AFStandingEntry(BaseModel):
+    """A single team row in a group standings table."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    rank: int
+    team: AFStandingTeam
+    points: int = 0
+    goalsDiff: int = 0  # noqa: N815
+    group: str | None = None
+    form: str | None = None
+    status: str | None = None
+    description: str | None = None
+    all: AFStandingStats = Field(default_factory=AFStandingStats)
+    home: AFStandingStats = Field(default_factory=AFStandingStats)
+    away: AFStandingStats = Field(default_factory=AFStandingStats)
+    update: str | None = None
+
+
+class AFStandingsLeague(BaseModel):
+    """League wrapper for standings data."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int
+    name: str
+    country: str | None = None
+    logo: str | None = None
+    flag: str | None = None
+    season: int
+    standings: list[list[AFStandingEntry]] = []
+
+
+class AFStandingsResponse(BaseModel):
+    """Top-level item from ``/standings`` response array."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    league: AFStandingsLeague
+
+
 # ── Events ────────────────────────────────────────────────────────────
 
 

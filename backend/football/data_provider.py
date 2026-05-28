@@ -45,6 +45,7 @@ from backend.football.schemas import (
     AFLineup,
     AFOdds,
     AFPrediction,
+    AFStandingsResponse,
 )
 from backend.shared.async_singleflight import AsyncSingleflight
 
@@ -524,6 +525,22 @@ class APIFootballClient:
             ttl=ENDPOINT_TTLS["team_last_fixtures"],
         )
         return [AFFixture.model_validate(item) for item in items]
+
+    async def get_standings(
+        self,
+        league: int = WC_LEAGUE_ID,
+        season: int = WC_SEASON,
+    ) -> AFStandingsResponse | None:
+        """Standings for a league/season (group tables)."""
+        items = await self._request(
+            "/standings",
+            {"league": league, "season": season},
+            cache_method="standings",
+            ttl=ENDPOINT_TTLS["standings"],
+        )
+        if not items:
+            return None
+        return AFStandingsResponse.model_validate(items[0])
 
     async def get_rounds(
         self,

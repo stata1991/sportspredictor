@@ -12,6 +12,7 @@ import WorldCup2026Layout from './pages/football/WorldCup2026Layout';
 import SchedulePage from './pages/football/SchedulePage';
 import LiveMatchPage from './pages/football/LiveMatchPage';
 import TrackRecordPage from './pages/football/TrackRecordPage';
+import StandingsPage from './pages/football/StandingsPage';
 import MatchPage from './pages/football/MatchPage';
 import UpsetsPage from './pages/football/UpsetsPage';
 import NotFoundPage from './pages/NotFoundPage';
@@ -39,6 +40,7 @@ const AppContent: React.FC = () => {
           <Route index element={<SchedulePage />} />
           <Route path="live" element={<LiveMatchPage />} />
           <Route path="track-record" element={<TrackRecordPage />} />
+          <Route path="standings" element={<StandingsPage />} />
         </Route>
         <Route path="/football/match/:fixtureId" element={<MatchPage />} />
         <Route path="/football/upsets" element={<UpsetsPage />} />

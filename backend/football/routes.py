@@ -73,6 +73,7 @@ _CC_FIXTURE_NS = 300         # 5 min  — not started, low volatility
 _CC_FIXTURE_LIVE = 30        # 30 s   — in-play, high volatility
 _CC_FIXTURE_COMPLETED = 86400  # 24 h — result is final
 _CC_COVERAGE = 3600          # 1 h    — coverage flags rarely change
+_CC_STANDINGS = 60           # 60 s   — standings update after matches
 _CC_UPSETS = 120             # 2 min  — new upsets can appear
 _CC_PRE_MATCH_FRESH = 1800   # 30 min — freshly generated
 _CC_PRE_MATCH_CACHED = 300   # 5 min  — already cached, shorter refresh
@@ -244,6 +245,27 @@ async def get_coverage(
     _set_cache(response, _CC_COVERAGE)
     status = CoverageStatus.from_af_coverage(cov)
     return status.model_dump()
+
+
+@router.get("/standings")
+async def get_standings(
+    response: Response,
+    league: int = WC_LEAGUE_ID,
+    season: int = WC_SEASON,
+    client: APIFootballClient = Depends(get_football_client),
+) -> dict:
+    """Group standings for a league/season."""
+    try:
+        standings = await client.get_standings(league=league, season=season)
+    except APIFootballError as exc:
+        _raise_for_football_error(exc)
+
+    if standings is None:
+        _set_cache(response, _CC_STANDINGS)
+        return {"league": None, "groups": []}
+
+    _set_cache(response, _CC_STANDINGS)
+    return standings.model_dump(mode="json", by_alias=True)
 
 
 # ── Upset watch endpoint ──────────────────────────────────────────────

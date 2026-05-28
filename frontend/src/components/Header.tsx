@@ -141,6 +141,14 @@ const Header: React.FC = () => {
           <MenuItem
             onClick={() => {
               setFootballAnchorEl(null);
+              navigate('/football/world-cup-2026/standings');
+            }}
+          >
+            Standings
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              setFootballAnchorEl(null);
               navigate('/football/upsets');
             }}
           >

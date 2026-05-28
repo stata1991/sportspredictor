@@ -1470,3 +1470,147 @@ class TestListRounds:
         data = resp.json()
         assert data["count"] == 0
         assert data["rounds"] == []
+
+
+# ── Standings endpoint ───────────────────────────────────────────────
+
+
+def _make_standings_response():
+    """Build a minimal AFStandingsResponse for route tests."""
+    from backend.football.schemas import (
+        AFStandingEntry,
+        AFStandingGoals,
+        AFStandingStats,
+        AFStandingsLeague,
+        AFStandingsResponse,
+        AFStandingTeam,
+    )
+
+    def _team(tid: int, name: str) -> AFStandingTeam:
+        return AFStandingTeam(id=tid, name=name, logo=None)
+
+    def _stats(
+        played: int = 0, win: int = 0, draw: int = 0, lose: int = 0,
+        gf: int = 0, ga: int = 0,
+    ) -> AFStandingStats:
+        return AFStandingStats(
+            played=played, win=win, draw=draw, lose=lose,
+            goals=AFStandingGoals(goals_for=gf, against=ga),
+        )
+
+    group_a = [
+        AFStandingEntry(
+            rank=1, team=_team(10, "France"), points=0, goalsDiff=0,
+            group="Group A", all=_stats(),
+        ),
+        AFStandingEntry(
+            rank=2, team=_team(20, "Argentina"), points=0, goalsDiff=0,
+            group="Group A", all=_stats(),
+        ),
+    ]
+
+    return AFStandingsResponse(
+        league=AFStandingsLeague(
+            id=1, name="World Cup", season=2026,
+            standings=[group_a],
+        )
+    )
+
+
+class TestGetStandings:
+    @pytest.fixture(autouse=True)
+    def _setup_deps(self):
+        self.mock_client = AsyncMock()
+
+        async def _override_client():
+            return self.mock_client
+
+        _app.dependency_overrides.clear()
+        from backend.football.deps import get_football_client
+
+        _app.dependency_overrides[get_football_client] = _override_client
+
+        yield
+        _app.dependency_overrides.clear()
+
+    async def test_returns_standings_with_expected_shape(self):
+        self.mock_client.get_standings = AsyncMock(
+            return_value=_make_standings_response()
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/standings")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "league" in data
+        league = data["league"]
+        assert league["id"] == 1
+        assert league["name"] == "World Cup"
+        assert league["season"] == 2026
+        assert isinstance(league["standings"], list)
+        assert len(league["standings"]) == 1
+        group = league["standings"][0]
+        assert len(group) == 2
+        assert group[0]["team"]["name"] == "France"
+        assert group[0]["rank"] == 1
+        assert group[1]["team"]["name"] == "Argentina"
+
+    async def test_cache_control_header_60s(self):
+        self.mock_client.get_standings = AsyncMock(
+            return_value=_make_standings_response()
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/standings")
+
+        assert resp.status_code == 200
+        assert "max-age=60" in resp.headers.get("cache-control", "")
+
+    async def test_upstream_error_returns_503(self):
+        from backend.football.exceptions import UpstreamError
+
+        self.mock_client.get_standings = AsyncMock(
+            side_effect=UpstreamError(status_code=500)
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/standings")
+
+        assert resp.status_code == 503
+
+    async def test_none_standings_returns_empty(self):
+        self.mock_client.get_standings = AsyncMock(return_value=None)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/standings")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["league"] is None
+        assert data["groups"] == []
+
+    async def test_goals_serialised_with_for_alias(self):
+        self.mock_client.get_standings = AsyncMock(
+            return_value=_make_standings_response()
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/standings")
+
+        data = resp.json()
+        entry = data["league"]["standings"][0][0]
+        goals = entry["all"]["goals"]
+        # Must use the "for" alias, not "goals_for"
+        assert "for" in goals
+        assert "against" in goals

@@ -16,9 +16,11 @@ const TAB_PATHS = [
   '/football/world-cup-2026',
   '/football/world-cup-2026/live',
   '/football/world-cup-2026/track-record',
+  '/football/world-cup-2026/standings',
 ] as const;
 
 function pathToTabIndex(pathname: string): number {
+  if (pathname.startsWith(TAB_PATHS[3])) return 3;
   if (pathname.startsWith(TAB_PATHS[2])) return 2;
   if (pathname.startsWith(TAB_PATHS[1])) return 1;
   return 0;
@@ -102,6 +104,7 @@ const FixtureProvider: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
           }
         />
         <Tab label="Track Record" data-testid="tab-track-record" />
+        <Tab label="Standings" data-testid="tab-standings" />
       </Tabs>
 
       <Outlet context={context} />
@@ -110,6 +113,12 @@ const FixtureProvider: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
 };
 
 function useRouteMeta(pathname: string) {
+  if (pathname.startsWith(TAB_PATHS[3])) {
+    return {
+      title: 'Group Standings — FIFA World Cup 2026 | FantasyFuel',
+      description: 'Live group standings for the FIFA World Cup 2026 — points, goal difference, and qualification status for all 12 groups.',
+    };
+  }
   if (pathname.startsWith(TAB_PATHS[2])) {
     return {
       title: 'Prediction Track Record — FIFA World Cup 2026 | FantasyFuel',
