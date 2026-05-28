@@ -1,18 +1,24 @@
 /**
  * Round-grouping utilities for the tournament schedule.
  *
- * API-Football returns per-group round strings like "Group A - 1",
- * "Group B - 1", etc.  For 48 teams that's 36 group-stage strings.
- * We aggregate into matchday categories: "Matchday 1", "Matchday 2",
- * "Matchday 3", and keep knockout round strings verbatim.
+ * API-Football returns round strings in the `league.round` field of each
+ * fixture.  For WC 2026 the group-stage strings are already aggregated
+ * ("Group Stage - 1", not "Group A - 1"), so we use them verbatim.
+ *
+ * If API-Football ever returns per-group strings ("Group A - 1"), the
+ * grouping function collapses them into "Matchday N" to keep the
+ * selector under ~9 items.
  */
 import { AFFixture } from '../types/fixture';
 
-/** Canonical ordering for round categories. */
+/**
+ * Canonical ordering for known round labels.
+ * Unknown labels sort after all known ones, ordered alphabetically.
+ */
 const ROUND_ORDER: readonly string[] = [
-  'Matchday 1',
-  'Matchday 2',
-  'Matchday 3',
+  'Group Stage - 1',
+  'Group Stage - 2',
+  'Group Stage - 3',
   'Round of 32',
   'Round of 16',
   'Quarter-finals',
@@ -24,13 +30,19 @@ const ROUND_ORDER: readonly string[] = [
 /**
  * Map an API-Football round string to a display category.
  *
- * "Group A - 1" → "Matchday 1"
- * "Round of 16" → "Round of 16"
+ * - Already-aggregated strings pass through: "Group Stage - 1" → "Group Stage - 1"
+ * - Per-group strings collapse: "Group A - 1" → "Group Stage - 1"
+ * - Knockout strings pass through verbatim.
  */
 export function getRoundCategory(round: string | null): string {
   if (!round) return 'Unknown';
-  const groupMatch = round.match(/^Group\s+\w+\s*-\s*(\d+)$/);
-  if (groupMatch) return `Matchday ${groupMatch[1]}`;
+
+  // Per-group format ("Group A - 1", "Group B - 2", etc.) → aggregate
+  const perGroupMatch = round.match(
+    /^Group\s+[A-Z]\s*-\s*(\d+)$/,
+  );
+  if (perGroupMatch) return `Group Stage - ${perGroupMatch[1]}`;
+
   return round;
 }
 
@@ -47,7 +59,7 @@ export interface RoundGroup {
 
 /**
  * Group fixtures by round category, sorted in tournament order.
- * Fixtures within each group retain their original order.
+ * Fixtures within each group are sorted by kickoff timestamp.
  */
 export function groupFixturesByRound(fixtures: AFFixture[]): RoundGroup[] {
   const map = new Map<string, AFFixture[]>();

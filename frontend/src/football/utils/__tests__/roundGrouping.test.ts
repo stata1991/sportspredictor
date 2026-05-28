@@ -48,10 +48,16 @@ const makeFixture = (
 });
 
 describe('getRoundCategory', () => {
-  test('maps group-stage rounds to matchday', () => {
-    expect(getRoundCategory('Group A - 1')).toBe('Matchday 1');
-    expect(getRoundCategory('Group L - 3')).toBe('Matchday 3');
-    expect(getRoundCategory('Group B - 2')).toBe('Matchday 2');
+  test('passes through verbatim Group Stage strings', () => {
+    expect(getRoundCategory('Group Stage - 1')).toBe('Group Stage - 1');
+    expect(getRoundCategory('Group Stage - 2')).toBe('Group Stage - 2');
+    expect(getRoundCategory('Group Stage - 3')).toBe('Group Stage - 3');
+  });
+
+  test('collapses per-group rounds to Group Stage', () => {
+    expect(getRoundCategory('Group A - 1')).toBe('Group Stage - 1');
+    expect(getRoundCategory('Group L - 3')).toBe('Group Stage - 3');
+    expect(getRoundCategory('Group B - 2')).toBe('Group Stage - 2');
   });
 
   test('passes through knockout rounds verbatim', () => {
@@ -71,25 +77,40 @@ describe('getRoundCategory', () => {
 describe('groupFixturesByRound', () => {
   test('groups and sorts in tournament order', () => {
     const fixtures = [
-      makeFixture(1, '2026-06-11T12:00:00Z', 'Group A - 1'),
-      makeFixture(2, '2026-06-15T12:00:00Z', 'Group B - 2'),
+      makeFixture(1, '2026-06-11T12:00:00Z', 'Group Stage - 1'),
+      makeFixture(2, '2026-06-15T12:00:00Z', 'Group Stage - 2'),
       makeFixture(3, '2026-07-19T12:00:00Z', 'Final'),
-      makeFixture(4, '2026-06-11T15:00:00Z', 'Group C - 1'),
+      makeFixture(4, '2026-06-11T15:00:00Z', 'Group Stage - 1'),
       makeFixture(5, '2026-07-05T12:00:00Z', 'Quarter-finals'),
     ];
 
     const groups = groupFixturesByRound(fixtures);
     expect(groups.map((g) => g.category)).toEqual([
-      'Matchday 1',
-      'Matchday 2',
+      'Group Stage - 1',
+      'Group Stage - 2',
       'Quarter-finals',
       'Final',
     ]);
 
-    // Matchday 1 should have 2 fixtures (A-1 and C-1), sorted by timestamp
+    // Group Stage - 1 should have 2 fixtures, sorted by timestamp
     expect(groups[0].fixtures).toHaveLength(2);
     expect(groups[0].fixtures[0].fixture.id).toBe(1);
     expect(groups[0].fixtures[1].fixture.id).toBe(4);
+  });
+
+  test('collapses per-group strings into Group Stage categories', () => {
+    const fixtures = [
+      makeFixture(1, '2026-06-11T12:00:00Z', 'Group A - 1'),
+      makeFixture(2, '2026-06-11T15:00:00Z', 'Group B - 1'),
+      makeFixture(3, '2026-06-15T12:00:00Z', 'Group A - 2'),
+    ];
+
+    const groups = groupFixturesByRound(fixtures);
+    expect(groups.map((g) => g.category)).toEqual([
+      'Group Stage - 1',
+      'Group Stage - 2',
+    ]);
+    expect(groups[0].fixtures).toHaveLength(2);
   });
 
   test('returns empty array for empty fixtures', () => {
@@ -100,13 +121,13 @@ describe('groupFixturesByRound', () => {
 describe('getRoundCategories', () => {
   test('returns sorted unique categories', () => {
     const fixtures = [
-      makeFixture(1, '2026-06-11T12:00:00Z', 'Group A - 1'),
-      makeFixture(2, '2026-06-11T15:00:00Z', 'Group B - 1'),
+      makeFixture(1, '2026-06-11T12:00:00Z', 'Group Stage - 1'),
+      makeFixture(2, '2026-06-11T15:00:00Z', 'Group Stage - 1'),
       makeFixture(3, '2026-07-19T12:00:00Z', 'Final'),
     ];
 
     const cats = getRoundCategories(fixtures);
-    expect(cats).toEqual(['Matchday 1', 'Final']);
+    expect(cats).toEqual(['Group Stage - 1', 'Final']);
   });
 });
 
@@ -117,12 +138,12 @@ describe('getDefaultRound', () => {
     const todayISO = today.toISOString();
 
     const groups = groupFixturesByRound([
-      makeFixture(1, '2026-06-11T12:00:00Z', 'Group A - 1'),
-      makeFixture(2, todayISO, 'Group B - 2'),
+      makeFixture(1, '2026-06-11T12:00:00Z', 'Group Stage - 1'),
+      makeFixture(2, todayISO, 'Group Stage - 2'),
     ]);
 
     const result = getDefaultRound(groups);
-    expect(result).toBe('Matchday 2');
+    expect(result).toBe('Group Stage - 2');
   });
 
   test('selects first round with future matches when none today', () => {
@@ -130,17 +151,17 @@ describe('getDefaultRound', () => {
     const futureISO = future.toISOString();
 
     const groups = groupFixturesByRound([
-      makeFixture(1, '2020-01-01T12:00:00Z', 'Group A - 1'),
-      makeFixture(2, futureISO, 'Group B - 2'),
+      makeFixture(1, '2020-01-01T12:00:00Z', 'Group Stage - 1'),
+      makeFixture(2, futureISO, 'Group Stage - 2'),
     ]);
 
     const result = getDefaultRound(groups);
-    expect(result).toBe('Matchday 2');
+    expect(result).toBe('Group Stage - 2');
   });
 
   test('selects last round when all in past', () => {
     const groups = groupFixturesByRound([
-      makeFixture(1, '2020-01-01T12:00:00Z', 'Group A - 1'),
+      makeFixture(1, '2020-01-01T12:00:00Z', 'Group Stage - 1'),
       makeFixture(2, '2020-02-01T12:00:00Z', 'Final'),
     ]);
 
@@ -160,12 +181,14 @@ describe('getDefaultDate', () => {
     const todayISO = today.toISOString();
     const todayKey = toLocalDateKey(todayISO);
 
-    const fixtures = [makeFixture(1, todayISO, 'Group A - 1')];
+    const fixtures = [makeFixture(1, todayISO, 'Group Stage - 1')];
     expect(getDefaultDate(fixtures)).toBe(todayKey);
   });
 
   test('returns all when round has no matches today', () => {
-    const fixtures = [makeFixture(1, '2026-06-11T12:00:00Z', 'Group A - 1')];
+    const fixtures = [
+      makeFixture(1, '2026-06-11T12:00:00Z', 'Group Stage - 1'),
+    ];
     expect(getDefaultDate(fixtures)).toBe('all');
   });
 });
@@ -173,9 +196,9 @@ describe('getDefaultDate', () => {
 describe('getUniqueDates', () => {
   test('returns sorted unique dates', () => {
     const fixtures = [
-      makeFixture(1, '2026-06-12T12:00:00Z', 'Group A - 1'),
-      makeFixture(2, '2026-06-11T12:00:00Z', 'Group A - 1'),
-      makeFixture(3, '2026-06-12T18:00:00Z', 'Group A - 1'),
+      makeFixture(1, '2026-06-12T12:00:00Z', 'Group Stage - 1'),
+      makeFixture(2, '2026-06-11T12:00:00Z', 'Group Stage - 1'),
+      makeFixture(3, '2026-06-12T18:00:00Z', 'Group Stage - 1'),
     ];
 
     const dates = getUniqueDates(fixtures);

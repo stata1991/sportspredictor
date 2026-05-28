@@ -11,7 +11,7 @@ function makeFixture(
   id: number,
   homeName: string,
   awayName: string,
-  round: string = 'Group A - 1',
+  round: string = 'Group Stage - 1',
   isoDate: string = '2026-06-11T18:00:00+00:00',
 ): AFFixture {
   return {
@@ -106,22 +106,22 @@ describe('SchedulePage', () => {
 
   test('renders round selector with all round categories', () => {
     const fixtures = [
-      makeFixture(1, 'France', 'Germany', 'Group A - 1', '2026-06-11T18:00:00Z'),
-      makeFixture(2, 'Brazil', 'Argentina', 'Group B - 2', '2026-06-15T18:00:00Z'),
+      makeFixture(1, 'France', 'Germany', 'Group Stage - 1', '2026-06-11T18:00:00Z'),
+      makeFixture(2, 'Brazil', 'Argentina', 'Group Stage - 2', '2026-06-15T18:00:00Z'),
       makeFixture(3, 'Spain', 'Italy', 'Final', '2026-07-19T18:00:00Z'),
     ];
     renderWithContext({ fixtures });
 
     expect(screen.getByTestId('round-selector')).toBeInTheDocument();
-    expect(screen.getByText('Matchday 1')).toBeInTheDocument();
-    expect(screen.getByText('Matchday 2')).toBeInTheDocument();
+    expect(screen.getByText('Group Stage - 1')).toBeInTheDocument();
+    expect(screen.getByText('Group Stage - 2')).toBeInTheDocument();
     expect(screen.getByText('Final')).toBeInTheDocument();
   });
 
   test('renders date filter for the selected round', () => {
     const fixtures = [
-      makeFixture(1, 'France', 'Germany', 'Group A - 1', '2026-06-11T18:00:00Z'),
-      makeFixture(2, 'USA', 'Brazil', 'Group B - 1', '2026-06-12T18:00:00Z'),
+      makeFixture(1, 'France', 'Germany', 'Group Stage - 1', '2026-06-11T18:00:00Z'),
+      makeFixture(2, 'USA', 'Brazil', 'Group Stage - 1', '2026-06-12T18:00:00Z'),
     ];
     renderWithContext({ fixtures });
 
@@ -131,8 +131,8 @@ describe('SchedulePage', () => {
 
   test('date filter narrows fixtures within a round', async () => {
     const fixtures = [
-      makeFixture(1, 'France', 'Germany', 'Group A - 1', '2026-06-11T12:00:00Z'),
-      makeFixture(2, 'USA', 'Brazil', 'Group B - 1', '2026-06-12T12:00:00Z'),
+      makeFixture(1, 'France', 'Germany', 'Group Stage - 1', '2026-06-11T12:00:00Z'),
+      makeFixture(2, 'USA', 'Brazil', 'Group Stage - 1', '2026-06-12T12:00:00Z'),
     ];
     renderWithContext({ fixtures });
 
@@ -157,13 +157,13 @@ describe('SchedulePage', () => {
   test('shows round empty state when no fixtures match round+date', async () => {
     // Use far-future dates to ensure they're not "today"
     const fixtures = [
-      makeFixture(1, 'France', 'Germany', 'Group A - 1', '2030-06-11T12:00:00Z'),
-      makeFixture(2, 'USA', 'Brazil', 'Group B - 2', '2030-06-15T12:00:00Z'),
+      makeFixture(1, 'France', 'Germany', 'Group Stage - 1', '2030-06-11T12:00:00Z'),
+      makeFixture(2, 'USA', 'Brazil', 'Group Stage - 2', '2030-06-15T12:00:00Z'),
     ];
     renderWithContext({ fixtures });
 
-    // Click on Matchday 2 (has only one fixture)
-    await userEvent.click(screen.getByText('Matchday 2'));
+    // Click on Group Stage - 2 (has only one fixture)
+    await userEvent.click(screen.getByText('Group Stage - 2'));
 
     // Click on a date that has no fixtures in this round
     // The date filter only shows dates for the selected round, so we need
@@ -187,7 +187,7 @@ describe('SchedulePage', () => {
 
   test('clicking a round chip changes the displayed fixtures', async () => {
     const fixtures = [
-      makeFixture(1, 'France', 'Germany', 'Group A - 1', '2026-06-11T12:00:00Z'),
+      makeFixture(1, 'France', 'Germany', 'Group Stage - 1', '2026-06-11T12:00:00Z'),
       makeFixture(2, 'Spain', 'Italy', 'Final', '2026-07-19T12:00:00Z'),
     ];
     renderWithContext({ fixtures });
