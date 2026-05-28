@@ -525,6 +525,22 @@ class APIFootballClient:
         )
         return [AFFixture.model_validate(item) for item in items]
 
+    async def get_rounds(
+        self,
+        league: int = WC_LEAGUE_ID,
+        season: int = WC_SEASON,
+    ) -> list[str]:
+        """Available rounds for a league/season (e.g. 'Group A - 1', 'Final')."""
+        items = await self._request(
+            "/fixtures/rounds",
+            {"league": league, "season": season},
+            cache_method="rounds",
+            ttl=ENDPOINT_TTLS["rounds"],
+        )
+        # API-Football returns rounds as a flat list of strings
+        # in the response array (not wrapped in objects).
+        return [str(r) for r in items]
+
     async def get_teams_for_league(
         self,
         league: int = WC_LEAGUE_ID,

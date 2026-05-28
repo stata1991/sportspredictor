@@ -1383,3 +1383,90 @@ class TestSingleShotFeatureFlag:
         assert set(responses[True]["reasoning"].keys()) == set(
             responses[False]["reasoning"].keys()
         )
+
+
+# ── Rounds endpoint ─────────────────────────────────────────────────
+
+
+class TestListRounds:
+    @pytest.fixture(autouse=True)
+    def _setup_deps(self):
+        self.mock_client = AsyncMock()
+
+        async def _override_client():
+            return self.mock_client
+
+        _app.dependency_overrides.clear()
+        from backend.football.deps import get_football_client
+
+        _app.dependency_overrides[get_football_client] = _override_client
+
+        yield
+        _app.dependency_overrides.clear()
+
+    async def test_returns_rounds_with_expected_shape(self):
+        self.mock_client.get_rounds = AsyncMock(
+            return_value=[
+                "Group A - 1",
+                "Group A - 2",
+                "Group A - 3",
+                "Round of 32",
+                "Round of 16",
+                "Quarter-finals",
+                "Semi-finals",
+                "3rd Place Final",
+                "Final",
+            ]
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/fixtures/rounds")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "count" in data
+        assert "rounds" in data
+        assert data["count"] == 9
+        assert isinstance(data["rounds"], list)
+        assert data["rounds"][0] == "Group A - 1"
+        assert data["rounds"][-1] == "Final"
+
+    async def test_cache_control_header_set(self):
+        self.mock_client.get_rounds = AsyncMock(return_value=["Group A - 1"])
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/fixtures/rounds")
+
+        assert resp.status_code == 200
+        assert "max-age=300" in resp.headers.get("cache-control", "")
+
+    async def test_upstream_error_returns_503(self):
+        from backend.football.exceptions import UpstreamError
+
+        self.mock_client.get_rounds = AsyncMock(
+            side_effect=UpstreamError(status_code=500)
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/fixtures/rounds")
+
+        assert resp.status_code == 503
+
+    async def test_empty_rounds_returns_zero_count(self):
+        self.mock_client.get_rounds = AsyncMock(return_value=[])
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/fixtures/rounds")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] == 0
+        assert data["rounds"] == []

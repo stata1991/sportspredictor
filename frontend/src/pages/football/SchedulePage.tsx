@@ -1,12 +1,72 @@
-import React from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Box, Typography, Button, Card, Skeleton } from '@mui/material';
 import { useOutletContext } from 'react-router-dom';
 import FixtureList from '../../football/components/FixtureList';
+import RoundSelector from '../../football/components/RoundSelector';
+import DateFilter from '../../football/components/DateFilter';
 import { WorldCupOutletContext } from '../../football/types/outletContext';
+import {
+  groupFixturesByRound,
+  getRoundCategories,
+  getDefaultRound,
+  getDefaultDate,
+  getUniqueDates,
+  toLocalDateKey,
+} from '../../football/utils/roundGrouping';
 
 const SchedulePage: React.FC = () => {
   const { fixtures, loading, error, onRetry, onFixtureClick } =
     useOutletContext<WorldCupOutletContext>();
+
+  const roundGroups = useMemo(() => groupFixturesByRound(fixtures), [fixtures]);
+  const roundCategories = useMemo(
+    () => getRoundCategories(fixtures),
+    [fixtures],
+  );
+
+  const defaultRound = useMemo(
+    () => getDefaultRound(roundGroups),
+    [roundGroups],
+  );
+
+  const [selectedRound, setSelectedRound] = useState<string>('');
+  const [selectedDate, setSelectedDate] = useState<string>('all');
+
+  // Set default round when fixtures load
+  useEffect(() => {
+    if (defaultRound && !selectedRound) {
+      setSelectedRound(defaultRound);
+    }
+  }, [defaultRound, selectedRound]);
+
+  // Get fixtures for the selected round
+  const roundFixtures = useMemo(() => {
+    const group = roundGroups.find((g) => g.category === selectedRound);
+    return group ? group.fixtures : [];
+  }, [roundGroups, selectedRound]);
+
+  // Get unique dates for the selected round
+  const roundDates = useMemo(
+    () => getUniqueDates(roundFixtures),
+    [roundFixtures],
+  );
+
+  // Reset date filter and set default when round changes
+  useEffect(() => {
+    setSelectedDate(getDefaultDate(roundFixtures));
+  }, [roundFixtures]);
+
+  // Filter fixtures by selected date
+  const filteredFixtures = useMemo(() => {
+    if (selectedDate === 'all') return roundFixtures;
+    return roundFixtures.filter(
+      (f) => toLocalDateKey(f.fixture.date) === selectedDate,
+    );
+  }, [roundFixtures, selectedDate]);
+
+  const handleRoundChange = (round: string) => {
+    setSelectedRound(round);
+  };
 
   if (loading) {
     return (
@@ -52,7 +112,34 @@ const SchedulePage: React.FC = () => {
     );
   }
 
-  return <FixtureList fixtures={fixtures} onFixtureClick={onFixtureClick} />;
+  return (
+    <Box>
+      <RoundSelector
+        rounds={roundCategories}
+        selected={selectedRound}
+        onChange={handleRoundChange}
+      />
+      <DateFilter
+        dates={roundDates}
+        selected={selectedDate}
+        onChange={setSelectedDate}
+      />
+      {filteredFixtures.length > 0 ? (
+        <FixtureList
+          fixtures={filteredFixtures}
+          onFixtureClick={onFixtureClick}
+        />
+      ) : (
+        <Box data-testid="round-empty-state" sx={{ textAlign: 'center', py: 6 }}>
+          <Typography variant="h6" sx={{ color: '#b0bec5' }}>
+            No matches scheduled
+            {selectedDate !== 'all' ? ` for this date` : ''}
+            {selectedRound ? ` in ${selectedRound}` : ''}.
+          </Typography>
+        </Box>
+      )}
+    </Box>
+  );
 };
 
 export default SchedulePage;

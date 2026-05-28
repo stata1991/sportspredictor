@@ -45,6 +45,7 @@ ENDPOINT_TTLS: Final[dict[str, int]] = {
     "coverage": 3_600,
     "headtohead": 21_600,
     "team_last_fixtures": 3_600,
+    "rounds": 3_600,
 }
 
 # Stale backup TTL multiplier (for two-key stale-while-error pattern)

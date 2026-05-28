@@ -180,6 +180,26 @@ async def list_fixtures(
     }
 
 
+@router.get("/fixtures/rounds")
+async def list_rounds(
+    response: Response,
+    league: int = WC_LEAGUE_ID,
+    season: int = WC_SEASON,
+    client: APIFootballClient = Depends(get_football_client),
+) -> dict:
+    """Available rounds for a league/season."""
+    try:
+        rounds = await client.get_rounds(league=league, season=season)
+    except APIFootballError as exc:
+        _raise_for_football_error(exc)
+
+    _set_cache(response, _CC_FIXTURES_LIST)
+    return {
+        "count": len(rounds),
+        "rounds": rounds,
+    }
+
+
 @router.get("/fixtures/{fixture_id}")
 async def get_fixture(
     fixture_id: int,
