@@ -227,9 +227,23 @@ class AFStandingGoals(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    # API-Football uses "for" as key, which is a Python reserved word
+    # API-Football uses "for" as key, which is a Python reserved word.
+    # Pre-tournament data has nulls for all stats — validator coerces to 0.
     goals_for: int = Field(0, alias="for")
     against: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_nulls(cls, data: Any) -> Any:
+        """Convert None → 0 for goals fields."""
+        if isinstance(data, dict):
+            data.setdefault("for", 0)
+            data.setdefault("against", 0)
+            if data["for"] is None:
+                data["for"] = 0
+            if data["against"] is None:
+                data["against"] = 0
+        return data
 
 
 class AFStandingStats(BaseModel):
@@ -242,6 +256,16 @@ class AFStandingStats(BaseModel):
     draw: int = 0
     lose: int = 0
     goals: AFStandingGoals = Field(default_factory=AFStandingGoals)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_nulls(cls, data: Any) -> Any:
+        """Convert None → 0 for stats fields (pre-tournament data has nulls)."""
+        if isinstance(data, dict):
+            for field in ("played", "win", "draw", "lose"):
+                if data.get(field) is None:
+                    data[field] = 0
+        return data
 
 
 class AFStandingEntry(BaseModel):
@@ -261,6 +285,17 @@ class AFStandingEntry(BaseModel):
     home: AFStandingStats = Field(default_factory=AFStandingStats)
     away: AFStandingStats = Field(default_factory=AFStandingStats)
     update: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_nulls(cls, data: Any) -> Any:
+        """Convert None → 0 for numeric fields (pre-tournament data has nulls)."""
+        if isinstance(data, dict):
+            if data.get("points") is None:
+                data["points"] = 0
+            if data.get("goalsDiff") is None:
+                data["goalsDiff"] = 0
+        return data
 
 
 class AFStandingsLeague(BaseModel):
