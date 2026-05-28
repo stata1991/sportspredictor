@@ -53,6 +53,8 @@ class Settings(BaseSettings):
     # in EB env to activate; kill via env var without a code deploy.
     prewarm_scheduler_enabled: bool = False
     prewarm_interval_seconds: int = 900
+    prewarm_window_start_minutes: int = 90
+    prewarm_window_end_minutes: int = 150
 
     @field_validator("database_url", mode="before")
     @classmethod

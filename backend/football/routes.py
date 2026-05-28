@@ -981,6 +981,17 @@ async def _warm_fixtures_background(
                         logger.exception(
                             "Pre-warm failed for fixture %d", fixture_id,
                         )
+                        import sentry_sdk as _sentry
+                        if _sentry.is_initialized():
+                            with _sentry.push_scope() as scope:
+                                scope.set_tag("fixture_id", fixture_id)
+                                scope.set_context("prewarm", {
+                                    "tick_id": tick_id,
+                                    "home_team": home_team,
+                                    "away_team": away_team,
+                                    "kickoff": ko_iso,
+                                })
+                                _sentry.capture_exception(exc)
                         results.append({
                             "fixture_id": fixture_id,
                             "home_team": home_team,
