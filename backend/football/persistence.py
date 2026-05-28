@@ -380,6 +380,7 @@ async def get_cached_bundle(
         .where(
             Prediction.fixture_id == fixture_id,
             Prediction.stage == stage,
+            Prediction.prediction_type.in_(PREDICTION_TYPES),
             Prediction.made_at >= cutoff,
         )
         .order_by(Prediction.made_at.desc())
