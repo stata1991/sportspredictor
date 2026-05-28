@@ -983,8 +983,8 @@ async def _warm_fixtures_background(
                         )
                         import sentry_sdk as _sentry
                         if _sentry.is_initialized():
-                            with _sentry.push_scope() as scope:
-                                scope.set_tag("fixture_id", fixture_id)
+                            with _sentry.new_scope() as scope:
+                                scope.set_tag("fixture_id", str(fixture_id))
                                 scope.set_context("prewarm", {
                                     "tick_id": tick_id,
                                     "home_team": home_team,
