@@ -407,6 +407,56 @@ class TestGetCachedBundle:
         assert cached is not None
         assert cached["winner"] is newer
 
+    async def test_query_filters_by_prediction_type(self, mock_session):
+        """Regression: the SQL query must include a prediction_type IN (...)
+        filter so that reasoning and upset_index rows — which share the same
+        fixture_id/stage — are excluded before the set-equality check.
+
+        Without this filter, sibling reasoning rows pollute the result set
+        and the set check ({4 types + reasoning + upset_index} != {4 types})
+        returns None — a permanent false cache miss.
+        """
+        self._mock_scalars(mock_session, [])
+        await get_cached_bundle(mock_session, 100, "pre_lineup")
+
+        # Capture the SQLAlchemy Select statement passed to session.execute
+        stmt = mock_session.execute.call_args[0][0]
+        compiled_sql = str(stmt)
+
+        # The compiled SQL must contain an IN clause on prediction_type
+        assert "prediction_type IN" in compiled_sql, (
+            "get_cached_bundle query is missing the prediction_type IN "
+            "filter — reasoning/upset_index rows will pollute the cache check"
+        )
+
+    async def test_sibling_reasoning_rows_cause_false_miss(self, mock_session):
+        """Documents the pollution scenario: if the SQL filter were removed
+        and the DB returned reasoning + upset_index rows alongside the four
+        prediction types, the set-equality check would fail (6 keys != 4)
+        and return None — a false cache miss.
+
+        This test locks in that the Python-level set check does NOT tolerate
+        extra prediction_type values, reinforcing that the SQL filter is the
+        sole defence against the pollution bug.
+        """
+        # Simulate what the DB would return WITHOUT the prediction_type filter:
+        # all 4 prediction types + reasoning + upset_index = 6 rows
+        rows = [
+            _make_prediction_row(prediction_type=t)
+            for t in PREDICTION_TYPES
+        ]
+        rows.append(_make_prediction_row(prediction_type="reasoning"))
+        rows.append(_make_prediction_row(prediction_type="upset_index"))
+        self._mock_scalars(mock_session, rows)
+
+        cached = await get_cached_bundle(mock_session, 100, "pre_lineup")
+        # The set check rejects extra types — this is the bug behaviour
+        # that the SQL filter prevents from ever being reached.
+        assert cached is None, (
+            "Expected None when reasoning/upset_index rows leak into the "
+            "result set (documents the pollution bug scenario)"
+        )
+
 
 # ── get_all_accuracy_rollups ─────────────────────────────────────────
 
