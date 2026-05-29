@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import {
   Box,
@@ -11,6 +11,8 @@ import {
 import { useStandings } from '../../football/hooks/useStandings';
 import { StandingEntry } from '../../football/types/standings';
 import { flagClass } from '../../football/utils/countryFlag';
+import { partitionStandings } from '../../football/utils/partitionStandings';
+import ThirdPlaceRankingCard from '../../football/components/ThirdPlaceRankingCard';
 import { colors } from '../../football/colors';
 
 const TeamCell: React.FC<{ entry: StandingEntry }> = ({ entry }) => {
@@ -126,18 +128,28 @@ const GroupCard: React.FC<{ group: StandingEntry[] }> = ({ group }) => {
 };
 
 const LoadingSkeleton: React.FC = () => (
-  <Grid container spacing={2}>
-    {Array.from({ length: 6 }).map((_, i) => (
-      <Grid key={i} size={{ xs: 12, sm: 6 }}>
-        <Card sx={{ p: 2, backgroundColor: 'rgba(26, 26, 26, 0.9)' }}>
-          <Skeleton variant="text" width="40%" sx={{ mb: 1 }} />
-          {Array.from({ length: 4 }).map((_, j) => (
-            <Skeleton key={j} variant="text" width="100%" />
-          ))}
-        </Card>
-      </Grid>
-    ))}
-  </Grid>
+  <>
+    <Grid container spacing={2}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <Grid key={i} size={{ xs: 12, sm: 6 }}>
+          <Card sx={{ p: 2, backgroundColor: 'rgba(26, 26, 26, 0.9)' }}>
+            <Skeleton variant="text" width="40%" sx={{ mb: 1 }} />
+            {Array.from({ length: 4 }).map((_, j) => (
+              <Skeleton key={j} variant="text" width="100%" />
+            ))}
+          </Card>
+        </Grid>
+      ))}
+    </Grid>
+    <Box data-testid="ranking-skeleton" sx={{ mt: 4 }}>
+      <Skeleton variant="text" width="50%" sx={{ mx: 'auto', mb: 1 }} />
+      <Card sx={{ p: 2, backgroundColor: 'rgba(26, 26, 26, 0.9)' }}>
+        {Array.from({ length: 6 }).map((_, j) => (
+          <Skeleton key={j} variant="text" width="100%" />
+        ))}
+      </Card>
+    </Box>
+  </>
 );
 
 const StandingsPage: React.FC = () => {
@@ -175,6 +187,11 @@ const StandingsPage: React.FC = () => {
 const StandingsContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
   const { groups, loading, error } = useStandings();
 
+  const { realGroups, thirdPlaceRanking } = useMemo(
+    () => partitionStandings(groups),
+    [groups],
+  );
+
   if (loading) {
     return (
       <Box data-testid="standings-loading">
@@ -210,13 +227,18 @@ const StandingsContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
   }
 
   return (
-    <Grid container spacing={2} data-testid="standings-grid">
-      {groups.map((group, i) => (
-        <Grid key={group[0]?.group ?? i} size={{ xs: 12, sm: 6 }}>
-          <GroupCard group={group} />
-        </Grid>
-      ))}
-    </Grid>
+    <>
+      <Grid container spacing={2} data-testid="standings-grid">
+        {realGroups.map((group, i) => (
+          <Grid key={group[0]?.group ?? i} size={{ xs: 12, sm: 6 }}>
+            <GroupCard group={group} />
+          </Grid>
+        ))}
+      </Grid>
+      {thirdPlaceRanking && (
+        <ThirdPlaceRankingCard entries={thirdPlaceRanking} />
+      )}
+    </>
   );
 };
 
