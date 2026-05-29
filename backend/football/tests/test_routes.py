@@ -1614,3 +1614,152 @@ class TestGetStandings:
         # Must use the "for" alias, not "goals_for"
         assert "for" in goals
         assert "against" in goals
+
+
+# ── Head-to-Head route tests ────────────────────────────────────────────
+
+
+class TestGetHeadToHead:
+    """Tests for GET /api/football/head-to-head."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_deps(self):
+        self.mock_client = AsyncMock()
+
+        async def _override_client():
+            return self.mock_client
+
+        _app.dependency_overrides.clear()
+        from backend.football.deps import get_football_client
+
+        _app.dependency_overrides[get_football_client] = _override_client
+
+        yield
+        _app.dependency_overrides.clear()
+
+    async def test_response_shape_with_fixtures(self):
+        """Returns fixtures, summary, and correct structure."""
+        h2h_fixtures = [
+            _make_fixture(
+                fixture_id=1, home_id=10, away_id=20,
+                home_name="Brazil", away_name="Germany",
+                home_goals=2, away_goals=1,
+                status_short="FT", status_long="Match Finished",
+            ),
+            _make_fixture(
+                fixture_id=2, home_id=20, away_id=10,
+                home_name="Germany", away_name="Brazil",
+                home_goals=0, away_goals=0,
+                status_short="FT", status_long="Match Finished",
+            ),
+            _make_fixture(
+                fixture_id=3, home_id=10, away_id=20,
+                home_name="Brazil", away_name="Germany",
+                home_goals=1, away_goals=3,
+                status_short="FT", status_long="Match Finished",
+            ),
+        ]
+        self.mock_client.get_head_to_head = AsyncMock(return_value=h2h_fixtures)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get(
+                "/api/football/head-to-head",
+                params={"team1": 10, "team2": 20, "last": 5},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["team1_id"] == 10
+        assert data["team2_id"] == 20
+        assert data["count"] == 3
+        assert len(data["fixtures"]) == 3
+        # Summary from team1 (id=10 = Brazil) perspective:
+        # Fixture 1: Brazil 2-1 Germany → win
+        # Fixture 2: Germany 0-0 Brazil → draw
+        # Fixture 3: Brazil 1-3 Germany → loss
+        assert data["summary"] == {"wins": 1, "draws": 1, "losses": 1}
+
+    async def test_cache_header_1h(self):
+        """Cache-Control should be 3600s (1 hour)."""
+        self.mock_client.get_head_to_head = AsyncMock(return_value=[])
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get(
+                "/api/football/head-to-head",
+                params={"team1": 10, "team2": 20},
+            )
+
+        assert resp.status_code == 200
+        assert "max-age=3600" in resp.headers.get("cache-control", "")
+
+    async def test_empty_result(self):
+        """No previous meetings returns empty fixtures and zero summary."""
+        self.mock_client.get_head_to_head = AsyncMock(return_value=[])
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get(
+                "/api/football/head-to-head",
+                params={"team1": 10, "team2": 20},
+            )
+
+        data = resp.json()
+        assert data["count"] == 0
+        assert data["fixtures"] == []
+        assert data["summary"] == {"wins": 0, "draws": 0, "losses": 0}
+
+    async def test_upstream_error_returns_503(self):
+        """Upstream errors translate to 503."""
+        from backend.football.exceptions import UpstreamError
+
+        self.mock_client.get_head_to_head = AsyncMock(
+            side_effect=UpstreamError("timeout")
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get(
+                "/api/football/head-to-head",
+                params={"team1": 10, "team2": 20},
+            )
+
+        assert resp.status_code == 503
+
+    async def test_summary_team1_away_win(self):
+        """When team1 is the away side and wins, summary counts it correctly."""
+        # team1=10, but in this fixture team1 is AWAY and wins 3-1
+        h2h_fixtures = [
+            _make_fixture(
+                fixture_id=5, home_id=20, away_id=10,
+                home_name="Germany", away_name="Brazil",
+                home_goals=1, away_goals=3,
+                status_short="FT", status_long="Match Finished",
+            ),
+        ]
+        self.mock_client.get_head_to_head = AsyncMock(return_value=h2h_fixtures)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get(
+                "/api/football/head-to-head",
+                params={"team1": 10, "team2": 20},
+            )
+
+        data = resp.json()
+        assert data["summary"] == {"wins": 1, "draws": 0, "losses": 0}
+
+    async def test_missing_team_params_returns_422(self):
+        """Omitting required team1/team2 params returns 422."""
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/head-to-head")
+
+        assert resp.status_code == 422

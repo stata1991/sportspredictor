@@ -86,6 +86,8 @@ export const FULL_RESPONSE: PreMatchPredictionResponse = {
   fixture_id: 1489369,
   home_team: 'Mexico',
   away_team: 'South Africa',
+  home_team_id: 2384,
+  away_team_id: 15,
   status: 'NS',
   stage: 'pre_lineup',
   model_version: 'dixon_coles_v1',

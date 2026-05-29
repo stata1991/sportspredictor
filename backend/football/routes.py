@@ -75,6 +75,7 @@ _CC_FIXTURE_COMPLETED = 86400  # 24 h — result is final
 _CC_COVERAGE = 3600          # 1 h    — coverage flags rarely change
 _CC_STANDINGS = 60           # 60 s   — standings update after matches
 _CC_UPSETS = 120             # 2 min  — new upsets can appear
+_CC_H2H = 3600              # 1 h    — historical record, rarely changes
 _CC_PRE_MATCH_FRESH = 1800   # 30 min — freshly generated
 _CC_PRE_MATCH_CACHED = 300   # 5 min  — already cached, shorter refresh
 _CC_LIVE_PRED = 30           # 30 s   — real-time
@@ -268,6 +269,60 @@ async def get_standings(
     return standings.model_dump(mode="json", by_alias=True)
 
 
+# ── Head-to-head endpoint ─────────────────────────────────────────────
+
+
+@router.get("/head-to-head")
+async def get_head_to_head(
+    response: Response,
+    team1: int = Query(..., description="API-Football team ID for team 1"),
+    team2: int = Query(..., description="API-Football team ID for team 2"),
+    last: int = Query(5, ge=1, le=10, description="Number of recent meetings"),
+    client: APIFootballClient = Depends(get_football_client),
+) -> dict:
+    """Head-to-head history between two teams.
+
+    Returns last N meetings with scores, dates, and a summary
+    (wins/draws/losses from team1's perspective).
+    """
+    try:
+        fixtures = await client.get_head_to_head(team1, team2, last=last)
+    except APIFootballError as exc:
+        _raise_for_football_error(exc)
+
+    # Compute W-D-L from team1's perspective.
+    wins, draws, losses = 0, 0, 0
+    for fx in fixtures:
+        if fx.goals.home is None or fx.goals.away is None:
+            continue
+        # Determine if team1 was home or away in this fixture.
+        if fx.teams.home.id == team1:
+            if fx.goals.home > fx.goals.away:
+                wins += 1
+            elif fx.goals.home < fx.goals.away:
+                losses += 1
+            else:
+                draws += 1
+        elif fx.teams.away.id == team1:
+            if fx.goals.away > fx.goals.home:
+                wins += 1
+            elif fx.goals.away < fx.goals.home:
+                losses += 1
+            else:
+                draws += 1
+        else:
+            draws += 1  # Shouldn't happen, but defensive.
+
+    _set_cache(response, _CC_H2H)
+    return {
+        "team1_id": team1,
+        "team2_id": team2,
+        "count": len(fixtures),
+        "summary": {"wins": wins, "draws": draws, "losses": losses},
+        "fixtures": [fx.model_dump(mode="json") for fx in fixtures],
+    }
+
+
 # ── Upset watch endpoint ──────────────────────────────────────────────
 
 # Statuses for finished/cancelled fixtures — excluded from upset watch.
@@ -409,6 +464,8 @@ async def predict_pre_match(
             "fixture_id": fixture_id,
             "home_team": fx.teams.home.name,
             "away_team": fx.teams.away.name,
+            "home_team_id": home_id,
+            "away_team_id": away_id,
             "status": status,
             "stage": "completed",
             "cached": True,
@@ -450,6 +507,8 @@ async def predict_pre_match(
             "fixture_id": fixture_id,
             "home_team": fx.teams.home.name,
             "away_team": fx.teams.away.name,
+            "home_team_id": home_id,
+            "away_team_id": away_id,
             "status": status,
             "stage": stage.value,
             "cached": True,
@@ -550,6 +609,8 @@ async def predict_pre_match(
         "fixture_id": fixture_id,
         "home_team": fx.teams.home.name,
         "away_team": fx.teams.away.name,
+        "home_team_id": home_id,
+        "away_team_id": away_id,
         "status": status,
         "stage": stage.value,
         "model_version": bundle.model_version,

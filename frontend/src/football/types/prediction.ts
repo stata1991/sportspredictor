@@ -99,6 +99,8 @@ export interface PreMatchPredictionResponse {
   fixture_id: number;
   home_team: string;
   away_team: string;
+  home_team_id: number;
+  away_team_id: number;
   status: string;
   stage: FixtureStage;
   model_version?: string;  // absent on cached completed responses

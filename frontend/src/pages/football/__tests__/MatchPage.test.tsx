@@ -165,7 +165,8 @@ describe('MatchPage', () => {
       expect(screen.getByTestId('why-panel')).toBeInTheDocument();
     });
 
-    expect(mockedApi.get).toHaveBeenCalledTimes(2);
+    // 2 prediction calls (initial + retry) + H2H call after retry succeeds
+    expect(mockedApi.get).toHaveBeenCalledTimes(3);
   });
 
   test('shows partial agent notice when reasoning is missing', async () => {

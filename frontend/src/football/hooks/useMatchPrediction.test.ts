@@ -94,6 +94,8 @@ describe('useMatchPrediction', () => {
       fixture_id: 1489369,
       home_team: 'Mexico',
       away_team: 'South Africa',
+      home_team_id: 16,
+      away_team_id: 1531,
       status: 'FT',
       stage: 'completed',
       cached: true,

@@ -21,6 +21,8 @@ export interface UseMatchPredictionResult {
   fixtureStatus: string | null;
   homeTeam: string | null;
   awayTeam: string | null;
+  homeTeamId: number | null;
+  awayTeamId: number | null;
   partialAgent: boolean;
   loading: boolean;
   error: Error | null;
@@ -37,6 +39,8 @@ const IDLE: UseMatchPredictionResult = {
   fixtureStatus: null,
   homeTeam: null,
   awayTeam: null,
+  homeTeamId: null,
+  awayTeamId: null,
   partialAgent: false,
   loading: false,
   error: null,
@@ -133,6 +137,8 @@ export function useMatchPrediction(
           fixtureStatus: data.status,
           homeTeam: data.home_team,
           awayTeam: data.away_team,
+          homeTeamId: data.home_team_id ?? null,
+          awayTeamId: data.away_team_id ?? null,
           partialAgent: !hasReasoning,
           loading: false,
           error: null,
@@ -153,6 +159,8 @@ export function useMatchPrediction(
           fixtureStatus,
           homeTeam: null,
           awayTeam: null,
+          homeTeamId: null,
+          awayTeamId: null,
           partialAgent: false,
           loading: false,
           error: new Error(message),

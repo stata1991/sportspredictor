@@ -4,8 +4,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Box, Typography, Button, CircularProgress } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useMatchPrediction } from '../../football/hooks/useMatchPrediction';
+import { useHeadToHead } from '../../football/hooks/useHeadToHead';
 import { isCompleted } from '../../football/utils/fixtureStatus';
 import WhyPanel from '../../football/components/whypanel/WhyPanel';
+import HeadToHeadSection from '../../football/components/HeadToHeadSection';
 import LiveMatchSection from '../../football/components/LiveMatchSection';
 import LiveBadge from '../../football/components/LiveBadge';
 import MatchUnavailableSection from '../../football/components/MatchUnavailableSection';
@@ -97,6 +99,7 @@ const MatchContent: React.FC<{
   onRetry: () => void;
 }> = ({ fixtureId, onRetry }) => {
   const result = useMatchPrediction(fixtureId);
+  const h2h = useHeadToHead(result.homeTeamId, result.awayTeamId);
 
   if (result.loading) {
     return (
@@ -164,6 +167,14 @@ const MatchContent: React.FC<{
         upset={result.upset}
         stage={result.stage}
         partialAgent={result.partialAgent}
+        homeTeam={result.homeTeam || 'Home'}
+        awayTeam={result.awayTeam || 'Away'}
+      />
+      <HeadToHeadSection
+        fixtures={h2h.fixtures}
+        summary={h2h.summary}
+        loading={h2h.loading}
+        error={h2h.error}
         homeTeam={result.homeTeam || 'Home'}
         awayTeam={result.awayTeam || 'Away'}
       />
