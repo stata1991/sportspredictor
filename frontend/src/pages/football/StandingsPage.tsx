@@ -64,7 +64,7 @@ const GroupCard: React.FC<{ group: StandingEntry[] }> = ({ group }) => {
       sx={{
         backgroundColor: 'rgba(26, 26, 26, 0.9)',
         borderLeft: `3px solid ${colors.homeAccent}`,
-        overflow: 'hidden',
+        overflow: 'clip',
       }}
     >
       <Box sx={{ px: 2, py: 1.5 }}>

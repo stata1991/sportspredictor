@@ -66,7 +66,7 @@ const ThirdPlaceRankingCard: React.FC<ThirdPlaceRankingCardProps> = ({
         backgroundColor: 'rgba(26, 26, 26, 0.9)',
         borderTop: `2px dashed ${colors.neutral}`,
         borderLeft: 'none',
-        overflow: 'hidden',
+        overflow: 'clip',
       }}
     >
       <Box sx={{ overflowX: 'auto' }}>

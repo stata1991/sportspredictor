@@ -14,16 +14,16 @@ const DateFilter: React.FC<DateFilterProps> = ({ dates, selected, onChange }) =>
     data-testid="date-filter"
     sx={{
       display: 'flex',
+      flexWrap: 'nowrap',
       gap: 0.75,
       overflowX: 'auto',
+      overflowY: 'hidden',
       pb: 1,
       mb: 2,
-      scrollbarWidth: 'thin',
-      '&::-webkit-scrollbar': { height: 4 },
-      '&::-webkit-scrollbar-thumb': {
-        backgroundColor: 'rgba(255,255,255,0.15)',
-        borderRadius: 2,
-      },
+      touchAction: 'pan-x',
+      WebkitOverflowScrolling: 'touch',
+      scrollbarWidth: 'none',
+      '&::-webkit-scrollbar': { display: 'none' },
     }}
   >
     <Chip

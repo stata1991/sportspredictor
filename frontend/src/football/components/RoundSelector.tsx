@@ -13,16 +13,16 @@ const RoundSelector: React.FC<RoundSelectorProps> = ({ rounds, selected, onChang
     data-testid="round-selector"
     sx={{
       display: 'flex',
+      flexWrap: 'nowrap',
       gap: 1,
       overflowX: 'auto',
+      overflowY: 'hidden',
       pb: 1,
       mb: 1.5,
-      scrollbarWidth: 'thin',
-      '&::-webkit-scrollbar': { height: 4 },
-      '&::-webkit-scrollbar-thumb': {
-        backgroundColor: 'rgba(255,255,255,0.15)',
-        borderRadius: 2,
-      },
+      touchAction: 'pan-x',
+      WebkitOverflowScrolling: 'touch',
+      scrollbarWidth: 'none',
+      '&::-webkit-scrollbar': { display: 'none' },
     }}
   >
     {rounds.map((round) => {

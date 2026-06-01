@@ -30,7 +30,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "prebuild": "test -n \"$PUPPETEER_EXECUTABLE_PATH\" || (echo 'ERROR: PUPPETEER_EXECUTABLE_PATH must be set for react-snap. See README.' && exit 1)",
+    "prebuild": "rm -rf build && test -n \"$PUPPETEER_EXECUTABLE_PATH\" || (echo 'ERROR: PUPPETEER_EXECUTABLE_PATH must be set for react-snap. See README.' && exit 1)",
     "build": "react-scripts build",
     "postbuild": "react-snap",
     "test": "react-scripts test",

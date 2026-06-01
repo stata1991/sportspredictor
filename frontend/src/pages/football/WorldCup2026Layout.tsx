@@ -61,7 +61,8 @@ const FixtureProvider: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
       <Tabs
         value={tabIndex}
         onChange={handleTabChange}
-        centered
+        variant="scrollable"
+        scrollButtons={false}
         textColor="inherit"
         data-testid="wc-tabs"
         TabIndicatorProps={{ sx: { backgroundColor: colors.homeAccent, height: 3 } }}
