@@ -468,6 +468,7 @@ async def predict_pre_match(
             "away_team_id": away_id,
             "status": status,
             "stage": "completed",
+            "round": fx.league.round,
             "cached": True,
             "message": (
                 "Fixture already completed. Returning most recent "
@@ -511,6 +512,7 @@ async def predict_pre_match(
             "away_team_id": away_id,
             "status": status,
             "stage": stage.value,
+            "round": fx.league.round,
             "cached": True,
             "predictions": {k: v.payload for k, v in cached.items()},
             "reasoning": reasoning_payload,
@@ -617,6 +619,7 @@ async def predict_pre_match(
         "away_team_id": away_id,
         "status": status,
         "stage": stage.value,
+        "round": bundle.round,
         "model_version": bundle.model_version,
         "confidence": bundle.confidence,
         "cached": False,

@@ -197,6 +197,20 @@ class TestEnginePipeline:
         assert w.p_home_win >= w.p_home_win_90 - 1e-9
         assert w.p_away_win >= w.p_away_win_90 - 1e-9
 
+    @pytest.mark.parametrize(
+        "round_str",
+        ["Final", "Round of 16", "Group Stage - 1", None],
+    )
+    def test_round_carried_onto_bundle(self, tmp_path, round_str):
+        """KO-2: the round string is persisted onto the bundle by
+        engine.predict — the single code path both generation sites
+        (live predict + prewarm) use, so both carry it identically."""
+        engine = _engine(tmp_path, _lopsided_model())
+        bundle = engine.predict(1, 2, "NS", round_str=round_str)
+        assert bundle.round == round_str
+        # Round is bundle-level metadata, not on the winner payload.
+        assert not hasattr(bundle.winner, "round")
+
     def test_knockout_serialises_for_jsonb(self, tmp_path):
         """Additive fields round-trip through model_dump (JSONB persistence)."""
         engine = _engine(tmp_path, _lopsided_model())

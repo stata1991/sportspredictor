@@ -238,4 +238,40 @@ describe('MatchPage', () => {
       expect(document.title).toContain('Mexico vs South Africa Prediction');
     });
   });
+
+  // ── Round badge (KO-2) ─────────────────────────────────────────
+
+  test('renders round badge with short label when round present', async () => {
+    // FULL_RESPONSE carries round = "Group Stage - 1" → "MD1".
+    mockedApi.get.mockResolvedValueOnce({ data: FULL_RESPONSE });
+    renderMatchPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('round-badge')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('round-badge')).toHaveTextContent('MD1');
+  });
+
+  test('renders knockout round badge (Final)', async () => {
+    mockedApi.get.mockResolvedValueOnce({
+      data: { ...FULL_RESPONSE, round: 'Final' },
+    });
+    renderMatchPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('round-badge')).toHaveTextContent('Final');
+    });
+  });
+
+  test('renders no round badge when round absent, page still renders', async () => {
+    const { round, ...noRound } = FULL_RESPONSE;
+    void round;
+    mockedApi.get.mockResolvedValueOnce({ data: noRound });
+    renderMatchPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('why-panel')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('round-badge')).not.toBeInTheDocument();
+  });
 });

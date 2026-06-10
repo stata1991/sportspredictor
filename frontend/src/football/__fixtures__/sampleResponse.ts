@@ -90,6 +90,7 @@ export const FULL_RESPONSE: PreMatchPredictionResponse = {
   away_team_id: 15,
   status: 'NS',
   stage: 'pre_lineup',
+  round: 'Group Stage - 1',
   model_version: 'dixon_coles_v1',
   confidence: 'low_data',
   cached: false,

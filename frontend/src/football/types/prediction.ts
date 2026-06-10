@@ -14,6 +14,13 @@ export interface WinnerPayload {
   lambda_away: number;
   scoreline_matrix: number[][]; // 8x8
   confidence: string;           // "normal" | "low_data"
+  // Knockout redistribution (KO-1). Absent on older cached bundles →
+  // treat as group-stage (ternary). When true, p_draw is 0.0 and
+  // p_home_win/p_away_win are the binary (redistributed) values.
+  is_knockout?: boolean;
+  p_home_win_90?: number | null; // original 90-minute ternary (debug)
+  p_draw_90?: number | null;
+  p_away_win_90?: number | null;
 }
 
 export interface TotalGoalsPayload {
@@ -103,6 +110,7 @@ export interface PreMatchPredictionResponse {
   away_team_id: number;
   status: string;
   stage: FixtureStage;
+  round?: string | null;   // API-Football league.round; absent on older payloads
   model_version?: string;  // absent on cached completed responses
   confidence?: string;     // absent on cached completed responses
   cached: boolean;

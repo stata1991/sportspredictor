@@ -229,6 +229,7 @@ class PredictionEngine:
             stage=stage,
             model_version=self.model_version,
             confidence=raw["confidence"],
+            round=round_str,
             winner=winner,
             total_goals=total_goals,
             ht_score=ht_score,

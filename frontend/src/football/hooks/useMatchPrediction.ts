@@ -18,6 +18,7 @@ export interface UseMatchPredictionResult {
   reasoning: Reasoning | null;
   upset: Upset | null;
   stage: FixtureStage | null;
+  round: string | null;
   fixtureStatus: string | null;
   homeTeam: string | null;
   awayTeam: string | null;
@@ -36,6 +37,7 @@ const IDLE: UseMatchPredictionResult = {
   reasoning: null,
   upset: null,
   stage: null,
+  round: null,
   fixtureStatus: null,
   homeTeam: null,
   awayTeam: null,
@@ -134,6 +136,7 @@ export function useMatchPrediction(
           reasoning: data.reasoning ?? null,
           upset: data.upset ?? null,
           stage: data.stage,
+          round: data.round ?? null,
           fixtureStatus: data.status,
           homeTeam: data.home_team,
           awayTeam: data.away_team,
@@ -156,6 +159,7 @@ export function useMatchPrediction(
           reasoning: null,
           upset: null,
           stage: null,
+          round: null,
           fixtureStatus,
           homeTeam: null,
           awayTeam: null,

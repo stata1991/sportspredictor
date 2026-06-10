@@ -116,19 +116,42 @@ const ConfidenceHeader: React.FC<{
   );
 };
 
-/** Horizontal probability bars for 1X2 outcome */
+/**
+ * Horizontal probability bars for the match result.
+ *
+ * Group stage → three bars (home / Draw / away).
+ * Knockout (`isKnockout`) → two bars only (home / away); the draw mass has
+ * already been redistributed server-side, so there is no draw segment. When
+ * the binary margin is within 5 points of a coinflip, a subtle caveat warns
+ * the tie could go to extra time / penalties.
+ */
+// Half-point of binary win prob within which a knockout tie is "close".
+// The +epsilon keeps the boundary (e.g. 0.55) inclusive despite binary
+// floating-point error (0.55 - 0.5 === 0.05000000000000004 in JS).
+const CLOSE_MARGIN = 0.05;
+const CLOSE_MARGIN_EPSILON = 1e-9;
+
 const WinnerBars: React.FC<{
   pHome: number;
   pDraw: number;
   pAway: number;
   homeTeam: string;
   awayTeam: string;
-}> = ({ pHome, pDraw, pAway, homeTeam, awayTeam }) => {
-  const bars = [
-    { label: homeTeam, value: pHome, color: colors.homeAccent },
-    { label: 'Draw', value: pDraw, color: colors.labelText },
-    { label: awayTeam, value: pAway, color: colors.awayAccent },
-  ];
+  isKnockout?: boolean;
+}> = ({ pHome, pDraw, pAway, homeTeam, awayTeam, isKnockout }) => {
+  const bars = isKnockout
+    ? [
+        { label: homeTeam, value: pHome, color: colors.homeAccent },
+        { label: awayTeam, value: pAway, color: colors.awayAccent },
+      ]
+    : [
+        { label: homeTeam, value: pHome, color: colors.homeAccent },
+        { label: 'Draw', value: pDraw, color: colors.labelText },
+        { label: awayTeam, value: pAway, color: colors.awayAccent },
+      ];
+
+  const closeMargin =
+    isKnockout && Math.abs(pHome - 0.5) <= CLOSE_MARGIN + CLOSE_MARGIN_EPSILON;
 
   return (
     <Box data-testid="winner-bars" sx={{ mb: 3 }}>
@@ -160,6 +183,21 @@ const WinnerBars: React.FC<{
           />
         </Box>
       ))}
+      {closeMargin && (
+        <Typography
+          data-testid="close-margin-caveat"
+          variant="caption"
+          sx={{
+            display: 'block',
+            mt: 0.5,
+            color: colors.caution,
+            fontStyle: 'italic',
+          }}
+        >
+          Margin this close, this one could go the distance — extra time,
+          maybe penalties.
+        </Typography>
+      )}
     </Box>
   );
 };
@@ -319,6 +357,7 @@ const NumbersSection: React.FC<NumbersSectionProps> = ({
         pAway={winner.p_away_win}
         homeTeam={homeTeam}
         awayTeam={awayTeam}
+        isKnockout={winner.is_knockout}
       />
 
       <TotalGoalsSection

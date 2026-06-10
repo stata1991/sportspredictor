@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { Helmet } from 'react-helmet-async';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Typography, Button, CircularProgress } from '@mui/material';
+import { Box, Typography, Button, CircularProgress, Chip } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useMatchPrediction } from '../../football/hooks/useMatchPrediction';
 import { useHeadToHead } from '../../football/hooks/useHeadToHead';
 import { isCompleted } from '../../football/utils/fixtureStatus';
+import { roundShortLabel } from '../../football/utils/roundLabel';
+import { colors } from '../../football/colors';
 import WhyPanel from '../../football/components/whypanel/WhyPanel';
 import HeadToHeadSection from '../../football/components/HeadToHeadSection';
 import LiveMatchSection from '../../football/components/LiveMatchSection';
@@ -143,6 +145,7 @@ const MatchContent: React.FC<{
   }
 
   const completed = isCompleted(result.fixtureStatus ?? '');
+  const roundLabel = roundShortLabel(result.round);
   const title = result.homeTeam && result.awayTeam
     ? `${result.homeTeam} vs ${result.awayTeam} Prediction | FantasyFuel`
     : 'Match Prediction | FantasyFuel';
@@ -156,6 +159,22 @@ const MatchContent: React.FC<{
           <meta property="og:description" content={`Win probability prediction for ${result.homeTeam} vs ${result.awayTeam} — FIFA World Cup 2026.`} />
         )}
       </Helmet>
+      {roundLabel && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+          <Chip
+            data-testid="round-badge"
+            label={roundLabel}
+            size="small"
+            sx={{
+              backgroundColor: colors.labelText,
+              color: colors.darkText,
+              fontWeight: 700,
+              fontSize: '0.7rem',
+              letterSpacing: '0.5px',
+            }}
+          />
+        </Box>
+      )}
       {completed && (
         <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
           <LiveBadge status={result.fixtureStatus!} />

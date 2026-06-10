@@ -88,6 +88,10 @@ class PredictionBundle(BaseModel):
     stage: FixtureStage
     model_version: str
     confidence: str
+    # Fixture-level metadata: the API-Football ``league.round`` string.
+    # Lives on the bundle (alongside stage/model_version), not in
+    # WinnerPayload — it describes the fixture, not the winner prediction.
+    round: str | None = None
     winner: WinnerPayload
     total_goals: TotalGoalsPayload
     ht_score: HTScorePayload

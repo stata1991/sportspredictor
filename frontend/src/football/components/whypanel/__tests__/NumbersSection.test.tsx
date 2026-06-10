@@ -110,6 +110,79 @@ describe('NumbersSection', () => {
     expect(ftsSection).toHaveTextContent('47%');
   });
 
+  // ── Knockout (KO-2): binary bar + close-margin caveat ──────────
+
+  const knockoutWinner = (pHome: number) => ({
+    ...FULL_PREDICTIONS,
+    winner: {
+      ...FULL_PREDICTIONS.winner,
+      is_knockout: true,
+      p_home_win: pHome,
+      p_draw: 0,
+      p_away_win: 1 - pHome,
+    },
+  });
+
+  test('group-stage renders three bars incl. Draw (is_knockout falsy)', () => {
+    render(<NumbersSection {...defaultProps} />);
+    const winnerBars = screen.getByTestId('winner-bars');
+    expect(winnerBars).toHaveTextContent('Draw');
+  });
+
+  test('knockout renders two bars, no Draw segment', () => {
+    render(
+      <NumbersSection {...defaultProps} prediction={knockoutWinner(0.6)} />,
+    );
+    const winnerBars = screen.getByTestId('winner-bars');
+    expect(winnerBars).toHaveTextContent('Mexico');
+    expect(winnerBars).toHaveTextContent('South Africa');
+    expect(winnerBars).not.toHaveTextContent('Draw');
+    // Binary split shows as 60% / 40%.
+    expect(winnerBars).toHaveTextContent('60%');
+    expect(winnerBars).toHaveTextContent('40%');
+  });
+
+  test('no "draw" anywhere in the knockout winner render', () => {
+    render(
+      <NumbersSection {...defaultProps} prediction={knockoutWinner(0.6)} />,
+    );
+    const winnerBars = screen.getByTestId('winner-bars');
+    expect(winnerBars.textContent?.toLowerCase()).not.toContain('draw');
+  });
+
+  test.each([0.5, 0.53, 0.55])(
+    'close-margin caveat present at p_home_win=%s',
+    (pHome) => {
+      render(
+        <NumbersSection {...defaultProps} prediction={knockoutWinner(pHome)} />,
+      );
+      expect(screen.getByTestId('close-margin-caveat')).toBeInTheDocument();
+    },
+  );
+
+  test.each([0.56, 0.7])(
+    'close-margin caveat absent at p_home_win=%s',
+    (pHome) => {
+      render(
+        <NumbersSection {...defaultProps} prediction={knockoutWinner(pHome)} />,
+      );
+      expect(
+        screen.queryByTestId('close-margin-caveat'),
+      ).not.toBeInTheDocument();
+    },
+  );
+
+  test('no caveat for group-stage even at a near-coinflip home prob', () => {
+    const balancedGroup = {
+      ...FULL_PREDICTIONS,
+      winner: { ...FULL_PREDICTIONS.winner, p_home_win: 0.5 },
+    };
+    render(<NumbersSection {...defaultProps} prediction={balancedGroup} />);
+    expect(
+      screen.queryByTestId('close-margin-caveat'),
+    ).not.toBeInTheDocument();
+  });
+
   // ── Heatmap integration ────────────────────────────────────────
 
   test('heatmap toggle is rendered when scoreline_matrix is present', () => {
