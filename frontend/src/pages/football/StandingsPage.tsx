@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import { Helmet } from 'react-helmet-async';
 import {
   Box,
@@ -242,6 +243,8 @@ const StandingsContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
     <>
       {frozen && (
         <Box
+          component={RouterLink}
+          to="/football/world-cup-2026/knockouts"
           data-testid="group-stage-complete-banner"
           sx={{
             display: 'flex',
@@ -252,8 +255,11 @@ const StandingsContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
             px: 2,
             py: 1,
             borderRadius: 2,
+            textDecoration: 'none',
+            cursor: 'pointer',
             backgroundColor: 'rgba(255, 111, 0, 0.12)',
             border: `1px solid ${colors.homeAccent}`,
+            '&:hover': { backgroundColor: 'rgba(255, 111, 0, 0.2)' },
           }}
         >
           <CheckCircleIcon sx={{ fontSize: '1rem', color: colors.homeAccent }} />
@@ -261,7 +267,7 @@ const StandingsContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
             variant="subtitle2"
             sx={{ fontWeight: 700, color: colors.textPrimary }}
           >
-            Group Stage Complete — knockout bracket is set
+            Group Stage Complete — see the knockout bracket
           </Typography>
         </Box>
       )}

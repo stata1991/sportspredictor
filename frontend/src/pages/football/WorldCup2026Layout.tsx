@@ -17,9 +17,11 @@ const TAB_PATHS = [
   '/football/world-cup-2026/live',
   '/football/world-cup-2026/track-record',
   '/football/world-cup-2026/standings',
+  '/football/world-cup-2026/knockouts',
 ] as const;
 
 function pathToTabIndex(pathname: string): number {
+  if (pathname.startsWith(TAB_PATHS[4])) return 4;
   if (pathname.startsWith(TAB_PATHS[3])) return 3;
   if (pathname.startsWith(TAB_PATHS[2])) return 2;
   if (pathname.startsWith(TAB_PATHS[1])) return 1;
@@ -106,6 +108,7 @@ const FixtureProvider: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
         />
         <Tab label="Track Record" data-testid="tab-track-record" />
         <Tab label="Standings" data-testid="tab-standings" />
+        <Tab label="Knockouts" data-testid="tab-knockouts" />
       </Tabs>
 
       <Outlet context={context} />
@@ -114,6 +117,12 @@ const FixtureProvider: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
 };
 
 function useRouteMeta(pathname: string) {
+  if (pathname.startsWith(TAB_PATHS[4])) {
+    return {
+      title: 'Knockout Bracket — FIFA World Cup 2026 | FantasyFuel',
+      description: 'Knockout-round fixtures and predictions for the FIFA World Cup 2026 — Round of 32 through the Final.',
+    };
+  }
   if (pathname.startsWith(TAB_PATHS[3])) {
     return {
       title: 'Group Standings — FIFA World Cup 2026 | FantasyFuel',

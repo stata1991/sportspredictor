@@ -13,6 +13,7 @@ import SchedulePage from './pages/football/SchedulePage';
 import LiveMatchPage from './pages/football/LiveMatchPage';
 import TrackRecordPage from './pages/football/TrackRecordPage';
 import StandingsPage from './pages/football/StandingsPage';
+import KnockoutsPage from './pages/football/KnockoutsPage';
 import MatchPage from './pages/football/MatchPage';
 import UpsetsPage from './pages/football/UpsetsPage';
 import NotFoundPage from './pages/NotFoundPage';
@@ -41,6 +42,7 @@ const AppContent: React.FC = () => {
           <Route path="live" element={<LiveMatchPage />} />
           <Route path="track-record" element={<TrackRecordPage />} />
           <Route path="standings" element={<StandingsPage />} />
+          <Route path="knockouts" element={<KnockoutsPage />} />
         </Route>
         <Route path="/football/match/:fixtureId" element={<MatchPage />} />
         <Route path="/football/upsets" element={<UpsetsPage />} />

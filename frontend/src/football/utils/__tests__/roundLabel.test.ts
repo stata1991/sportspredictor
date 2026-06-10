@@ -1,4 +1,4 @@
-import { roundShortLabel } from '../roundLabel';
+import { roundShortLabel, KNOCKOUT_ROUND_ORDER } from '../roundLabel';
 
 describe('roundShortLabel', () => {
   test.each([
@@ -29,5 +29,24 @@ describe('roundShortLabel', () => {
 
   test('empty string → null (no badge)', () => {
     expect(roundShortLabel('')).toBeNull();
+  });
+});
+
+describe('KNOCKOUT_ROUND_ORDER', () => {
+  test('is the six knockout rounds in tournament order', () => {
+    expect([...KNOCKOUT_ROUND_ORDER]).toEqual([
+      'Round of 32',
+      'Round of 16',
+      'Quarter-finals',
+      'Semi-finals',
+      '3rd Place Final',
+      'Final',
+    ]);
+  });
+
+  test('every entry has a short label', () => {
+    KNOCKOUT_ROUND_ORDER.forEach((r) => {
+      expect(roundShortLabel(r)).not.toBeNull();
+    });
   });
 });

@@ -33,4 +33,22 @@ describe('RoundSelector', () => {
     );
     expect(screen.getByTestId('round-selector')).toBeInTheDocument();
   });
+
+  test('renderLabel transforms chip labels while keeping raw selection values', async () => {
+    const onChange = jest.fn();
+    render(
+      <RoundSelector
+        rounds={['Round of 16', 'Final']}
+        selected="Round of 16"
+        onChange={onChange}
+        renderLabel={(r) => (r === 'Round of 16' ? 'R16' : r)}
+      />,
+    );
+    // Label is transformed...
+    expect(screen.getByText('R16')).toBeInTheDocument();
+    expect(screen.queryByText('Round of 16')).not.toBeInTheDocument();
+    // ...but onChange still emits the raw round value.
+    await userEvent.click(screen.getByText('R16'));
+    expect(onChange).toHaveBeenCalledWith('Round of 16');
+  });
 });

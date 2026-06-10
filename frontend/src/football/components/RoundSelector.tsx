@@ -6,9 +6,17 @@ interface RoundSelectorProps {
   rounds: string[];
   selected: string;
   onChange: (round: string) => void;
+  /** Optional display transform for chip labels (e.g. round → short label).
+   *  Selection/keys stay in the raw `rounds` space. Defaults to identity. */
+  renderLabel?: (round: string) => string;
 }
 
-const RoundSelector: React.FC<RoundSelectorProps> = ({ rounds, selected, onChange }) => (
+const RoundSelector: React.FC<RoundSelectorProps> = ({
+  rounds,
+  selected,
+  onChange,
+  renderLabel,
+}) => (
   <Box
     data-testid="round-selector"
     sx={{
@@ -30,7 +38,7 @@ const RoundSelector: React.FC<RoundSelectorProps> = ({ rounds, selected, onChang
       return (
         <Chip
           key={round}
-          label={round}
+          label={renderLabel ? renderLabel(round) : round}
           data-testid="round-chip"
           onClick={() => onChange(round)}
           variant={isSelected ? 'filled' : 'outlined'}

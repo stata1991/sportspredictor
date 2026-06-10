@@ -280,6 +280,22 @@ describe('StandingsPage', () => {
     expect(screen.getAllByTestId('qualified-marker')).toHaveLength(24);
   });
 
+  test('frozen banner links to the knockouts page (KO-4 item 7)', () => {
+    mockedUseStandings.mockReturnValue({
+      groups: twelveGroups(3),
+      loading: false,
+      error: null,
+    });
+    renderStandingsPage();
+
+    const banner = screen.getByTestId('group-stage-complete-banner');
+    expect(banner.tagName).toBe('A');
+    expect(banner).toHaveAttribute(
+      'href',
+      '/football/world-cup-2026/knockouts',
+    );
+  });
+
   test('frozen: ThirdPlaceRankingCard marks exactly top 8', () => {
     const ranking = Array.from({ length: 12 }, (_, i) =>
       makeEntry(i + 1, `Third-${i + 1}`, 700 + i, {

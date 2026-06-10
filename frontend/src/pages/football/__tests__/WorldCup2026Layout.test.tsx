@@ -92,6 +92,12 @@ describe('WorldCup2026Layout', () => {
     expect(screen.getByTestId('tab-track-record')).toBeInTheDocument();
   });
 
+  test('renders the Knockouts tab', () => {
+    renderLayout();
+    expect(screen.getByTestId('tab-knockouts')).toBeInTheDocument();
+    expect(screen.getByTestId('tab-knockouts')).toHaveTextContent('Knockouts');
+  });
+
   test('Schedule tab is active by default on index route', () => {
     renderLayout();
     const tab = screen.getByTestId('tab-schedule');

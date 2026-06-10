@@ -10,6 +10,26 @@
  * backend's KNOCKOUT_ROUNDS set in TypeScript.
  */
 
+/**
+ * Knockout rounds in tournament order — the source for the KO-4 round-tab
+ * strip and the default-round logic. This is DISPLAY/structure ordering, not
+ * a knockout-detection set (detection remains the backend `is_knockout`
+ * boolean on the payload — KO-2's decision).
+ *
+ * ⚠️ These strings are still UNVERIFIED against the live 2026 feed (the
+ * 48-team format has no precedent; API-Football has published only group
+ * rounds so far). See the scheduled round-string diff before trusting KO
+ * output. They share their source with ROUND_SHORT_LABELS below.
+ */
+export const KNOCKOUT_ROUND_ORDER = [
+  'Round of 32',
+  'Round of 16',
+  'Quarter-finals',
+  'Semi-finals',
+  '3rd Place Final',
+  'Final',
+] as const;
+
 const ROUND_SHORT_LABELS: Record<string, string> = {
   'Round of 32': 'R32',
   'Round of 16': 'R16',
