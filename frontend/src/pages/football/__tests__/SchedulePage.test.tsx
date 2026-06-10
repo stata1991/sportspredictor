@@ -113,9 +113,13 @@ describe('SchedulePage', () => {
     renderWithContext({ fixtures });
 
     expect(screen.getByTestId('round-selector')).toBeInTheDocument();
-    expect(screen.getByText('Group Stage - 1')).toBeInTheDocument();
-    expect(screen.getByText('Group Stage - 2')).toBeInTheDocument();
+    // Chips render via roundShortLabel: "Group Stage - N" → "MDn".
+    expect(screen.getByText('MD1')).toBeInTheDocument();
+    expect(screen.getByText('MD2')).toBeInTheDocument();
     expect(screen.getByText('Final')).toBeInTheDocument();
+    // Raw round strings must not leak onto the chips.
+    expect(screen.queryByText('Group Stage - 1')).not.toBeInTheDocument();
+    expect(screen.queryByText('Group Stage - 2')).not.toBeInTheDocument();
   });
 
   test('renders date filter for the selected round', () => {
@@ -162,8 +166,8 @@ describe('SchedulePage', () => {
     ];
     renderWithContext({ fixtures });
 
-    // Click on Group Stage - 2 (has only one fixture)
-    await userEvent.click(screen.getByText('Group Stage - 2'));
+    // Click on MD2 (Group Stage - 2 — has only one fixture)
+    await userEvent.click(screen.getByText('MD2'));
 
     // Click on a date that has no fixtures in this round
     // The date filter only shows dates for the selected round, so we need

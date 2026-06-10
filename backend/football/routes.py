@@ -50,7 +50,7 @@ from backend.football.persistence import (
     save_reasoning_output,
     save_upset_output,
 )
-from backend.football.predictions.derivations import derive_live_v1
+from backend.football.predictions.derivations import derive_live_v1, is_unknown_round
 from backend.football.predictions.engine import (
     PredictionEngine,
     detect_stage,
@@ -87,6 +87,26 @@ _CC_ACCURACY = 300           # 5 min  — computed periodically
 def _set_cache(response: Response, max_age: int) -> None:
     """Set Cache-Control header for CDN and browser caching."""
     response.headers["Cache-Control"] = f"public, max-age={max_age}"
+
+
+def _emit_unknown_round(round_str: str | None, fixture_id: int) -> bool:
+    """Tripwire: emit a structured warning when a fixture's round string is
+    neither a known knockout nor a known group-stage round.
+
+    Converts a silent misclassification — API-Football naming a 2026 round
+    something our constants didn't anticipate, which would make a knockout
+    fixture fall through to ternary probabilities — into a greppable log line
+    (``unknown_round_string``). Does NOT change classification. Returns True
+    if a warning was emitted.
+    """
+    if not is_unknown_round(round_str):
+        return False
+    _emit({
+        "event": "unknown_round_string",
+        "round": round_str,
+        "fixture_id": fixture_id,
+    })
+    return True
 
 # ── Prediction engine singleton ──────────────────────────────────────
 
@@ -520,6 +540,7 @@ async def predict_pre_match(
         }
 
     # ── Generate fresh predictions ──────────────────────────────
+    _emit_unknown_round(fx.league.round, fixture_id)
     with timed_step("dixon_coles", fixture_id=fixture_id):
         engine = _get_engine()
         bundle = engine.predict(
@@ -1023,6 +1044,7 @@ async def _warm_fixtures_background(
                         t0 = time.monotonic()
 
                         # ── Generate predictions (same path as predict_pre_match) ──
+                        _emit_unknown_round(fx.league.round, fixture_id)
                         engine = _get_engine()
                         bundle = engine.predict(
                             home_id, away_id, status,

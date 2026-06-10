@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from backend.football.routes import _get_engine, router
+from backend.football.routes import _emit_unknown_round, _get_engine, router
 from backend.football.schemas import (
     AFFixture,
     AFFixtureInfo,
@@ -28,6 +28,28 @@ from backend.football.schemas import (
     AFVenue,
 )
 from backend.shared.models import AccuracyRollup, Prediction
+
+# ── Unknown-round tripwire (KO-5) ─────────────────────────────────────
+
+
+class TestUnknownRoundTripwire:
+    def test_unknown_round_emits_event(self, capsys):
+        emitted = _emit_unknown_round("Round of 64", 12345)
+        assert emitted is True
+        out = capsys.readouterr().out
+        assert '"event": "unknown_round_string"' in out
+        assert '"round": "Round of 64"' in out
+        assert '"fixture_id": 12345' in out
+
+    @pytest.mark.parametrize(
+        "round_str",
+        ["Round of 16", "Final", "Group Stage - 2", None],
+    )
+    def test_known_or_none_does_not_emit(self, capsys, round_str):
+        emitted = _emit_unknown_round(round_str, 1)
+        assert emitted is False
+        assert capsys.readouterr().out == ""
+
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

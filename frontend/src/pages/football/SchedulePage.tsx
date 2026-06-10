@@ -5,6 +5,7 @@ import FixtureList from '../../football/components/FixtureList';
 import RoundSelector from '../../football/components/RoundSelector';
 import DateFilter from '../../football/components/DateFilter';
 import { WorldCupOutletContext } from '../../football/types/outletContext';
+import { roundShortLabel } from '../../football/utils/roundLabel';
 import {
   groupFixturesByRound,
   getRoundCategories,
@@ -118,6 +119,7 @@ const SchedulePage: React.FC = () => {
         rounds={roundCategories}
         selected={selectedRound}
         onChange={handleRoundChange}
+        renderLabel={(r) => roundShortLabel(r) ?? r}
       />
       <DateFilter
         dates={roundDates}
@@ -134,7 +136,7 @@ const SchedulePage: React.FC = () => {
           <Typography variant="h6" sx={{ color: '#b0bec5' }}>
             No matches scheduled
             {selectedDate !== 'all' ? ` for this date` : ''}
-            {selectedRound ? ` in ${selectedRound}` : ''}.
+            {selectedRound ? ` in ${roundShortLabel(selectedRound) ?? selectedRound}` : ''}.
           </Typography>
         </Box>
       )}

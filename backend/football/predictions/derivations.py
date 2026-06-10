@@ -7,6 +7,7 @@ No I/O, no side-effects — easy to unit-test.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import numpy as np
@@ -75,6 +76,30 @@ def is_knockout_round(round_str: str | None) -> bool:
     and unknown strings) is treated as a group-stage (ternary) fixture.
     """
     return round_str in KNOCKOUT_ROUNDS
+
+
+# Recognised group-stage round format (e.g. "Group Stage - 1"). Used only by
+# the unknown-round tripwire — NOT by classification.
+_GROUP_STAGE_ROUND_RE = re.compile(r"^Group Stage - \d+$")
+
+
+def is_unknown_round(round_str: str | None) -> bool:
+    """True when ``round_str`` is a non-null string we recognise as neither a
+    knockout round nor a group-stage round.
+
+    Telemetry only — this does NOT change classification (an unknown round is
+    still treated as ternary by :func:`is_knockout_round`). It exists so the
+    tripwire can flag the case where API-Football names a 2026 round something
+    we didn't anticipate (the 48-team format has no precedent). ``None`` is not
+    "unknown" — it just means no round was provided.
+    """
+    if round_str is None:
+        return False
+    if round_str in KNOCKOUT_ROUNDS:
+        return False
+    if _GROUP_STAGE_ROUND_RE.match(round_str):
+        return False
+    return True
 
 
 def redistribute_draw_to_winners(

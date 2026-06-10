@@ -16,6 +16,7 @@ from backend.football.models.dixon_coles import DixonColesModel
 from backend.football.predictions.derivations import (
     KNOCKOUT_ROUNDS,
     is_knockout_round,
+    is_unknown_round,
     redistribute_draw_to_winners,
 )
 from backend.football.predictions.engine import PredictionEngine
@@ -55,6 +56,31 @@ class TestIsKnockoutRound:
 
     def test_constant_holds_exactly_six(self):
         assert KNOCKOUT_ROUNDS == frozenset(self.KNOCKOUT_STRINGS)
+
+
+# ── is_unknown_round (KO-5 tripwire classifier) ───────────────────────
+
+
+class TestIsUnknownRound:
+    @pytest.mark.parametrize("round_str", sorted(KNOCKOUT_ROUNDS))
+    def test_known_knockout_not_unknown(self, round_str):
+        assert is_unknown_round(round_str) is False
+
+    @pytest.mark.parametrize(
+        "round_str", ["Group Stage - 1", "Group Stage - 2", "Group Stage - 3"]
+    )
+    def test_known_group_not_unknown(self, round_str):
+        assert is_unknown_round(round_str) is False
+
+    def test_none_is_not_unknown(self):
+        assert is_unknown_round(None) is False
+
+    @pytest.mark.parametrize(
+        "round_str",
+        ["Round of 64", "Knockout Round Play-offs", "Group A - 1", "Playoff", ""],
+    )
+    def test_unrecognised_string_is_unknown(self, round_str):
+        assert is_unknown_round(round_str) is True
 
 
 # ── redistribute_draw_to_winners ──────────────────────────────────────

@@ -79,7 +79,7 @@ describe('defaultKnockoutRound', () => {
     ).toBe('Round of 16');
   });
 
-  test('all knockout rounds finished → Final', () => {
+  test('all knockout rounds finished AND published → Final', () => {
     expect(
       defaultKnockoutRound([
         fx('Round of 32', 'FT'),
@@ -87,6 +87,23 @@ describe('defaultKnockoutRound', () => {
         fx('Final', 'PEN'),
       ]),
     ).toBe('Final');
+  });
+
+  test('publication gap: R32 all finished, later rounds not yet published → R32', () => {
+    // The fix: fall back to the last round WITH fixtures, not an empty Final.
+    expect(
+      defaultKnockoutRound([fx('Round of 32', 'FT'), fx('Round of 32', 'AET')]),
+    ).toBe('Round of 32');
+  });
+
+  test('publication gap: finished up to QF, SF/Final not yet published → QF', () => {
+    expect(
+      defaultKnockoutRound([
+        fx('Round of 32', 'FT'),
+        fx('Round of 16', 'FT'),
+        fx('Quarter-finals', 'FT'),
+      ]),
+    ).toBe('Quarter-finals');
   });
 
   test('R32 present but not all finished → R32', () => {
