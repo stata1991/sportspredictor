@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
@@ -233,5 +233,87 @@ describe('StandingsPage', () => {
     expect(screen.getByText('South Korea')).toBeInTheDocument();
     expect(screen.getByText('Qatar')).toBeInTheDocument();
     expect(screen.getByText('Haiti')).toBeInTheDocument();
+  });
+
+  // ── Frozen (post-group-stage) state (KO-3) ─────────────────────
+
+  // 12 real groups (length 4) where every team has `played` matches.
+  const twelveGroups = (played: number): StandingEntry[][] =>
+    Array.from({ length: 12 }, (_, i) =>
+      ['T1', 'T2', 'T3', 'T4'].map((t, r) =>
+        makeEntry(r + 1, `G${i + 1}-${t}`, i * 10 + r + 1, {
+          group: `Group ${i + 1}`,
+          played,
+        }),
+      ),
+    );
+
+  test('NOT frozen: no banner, no qualified markers (live group stage)', () => {
+    mockedUseStandings.mockReturnValue({
+      groups: twelveGroups(2), // every team mid-stage
+      loading: false,
+      error: null,
+    });
+    renderStandingsPage();
+
+    expect(
+      screen.queryByTestId('group-stage-complete-banner'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId('qualified-marker')).toHaveLength(0);
+  });
+
+  test('frozen: banner present + exactly top 2 of each group marked', () => {
+    mockedUseStandings.mockReturnValue({
+      groups: twelveGroups(3),
+      loading: false,
+      error: null,
+    });
+    renderStandingsPage();
+
+    expect(
+      screen.getByTestId('group-stage-complete-banner'),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('group-stage-complete-banner')).toHaveTextContent(
+      'Group Stage Complete',
+    );
+    // 12 groups × top 2 = 24 markers.
+    expect(screen.getAllByTestId('qualified-marker')).toHaveLength(24);
+  });
+
+  test('frozen: ThirdPlaceRankingCard marks exactly top 8', () => {
+    const ranking = Array.from({ length: 12 }, (_, i) =>
+      makeEntry(i + 1, `Third-${i + 1}`, 700 + i, {
+        group: 'Ranking of third-placed teams',
+        played: 3,
+      }),
+    );
+    mockedUseStandings.mockReturnValue({
+      groups: [...twelveGroups(3), ranking],
+      loading: false,
+      error: null,
+    });
+    renderStandingsPage();
+
+    // 24 (groups) + 8 (third place) = 32.
+    expect(screen.getAllByTestId('qualified-marker')).toHaveLength(32);
+    // Scope to the third-place card → exactly 8 there.
+    const thirdPlace = screen.getByTestId('third-place-card');
+    expect(
+      within(thirdPlace).getAllByTestId('qualified-marker'),
+    ).toHaveLength(8);
+  });
+
+  test('guard: 11 complete groups → NOT frozen (no banner/markers)', () => {
+    mockedUseStandings.mockReturnValue({
+      groups: twelveGroups(3).slice(0, 11),
+      loading: false,
+      error: null,
+    });
+    renderStandingsPage();
+
+    expect(
+      screen.queryByTestId('group-stage-complete-banner'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryAllByTestId('qualified-marker')).toHaveLength(0);
   });
 });

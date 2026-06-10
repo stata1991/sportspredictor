@@ -3,6 +3,10 @@ import { Box, Card, Typography } from '@mui/material';
 import { StandingEntry } from '../types/standings';
 import { flagClass } from '../utils/countryFlag';
 import { colors } from '../colors';
+import QualifiedMarker from './QualifiedMarker';
+
+/** Best N of 12 third-placed teams advance to the Round of 32. */
+const THIRD_PLACE_QUALIFIERS = 8;
 
 const thSx = {
   py: 0.5,
@@ -39,10 +43,12 @@ const TeamCell: React.FC<{ entry: StandingEntry }> = ({ entry }) => {
 
 interface ThirdPlaceRankingCardProps {
   entries: StandingEntry[];
+  frozen?: boolean;
 }
 
 const ThirdPlaceRankingCard: React.FC<ThirdPlaceRankingCardProps> = ({
   entries,
+  frozen,
 }) => (
   <Box data-testid="third-place-section" sx={{ mt: 4 }}>
     <Box sx={{ mb: 2, textAlign: 'center' }}>
@@ -86,10 +92,11 @@ const ThirdPlaceRankingCard: React.FC<ThirdPlaceRankingCardProps> = ({
             </tr>
           </thead>
           <tbody>
-            {entries.map((entry) => (
+            {entries.map((entry, idx) => (
               <tr key={entry.team.id}>
                 <Box component="td" sx={{ ...tdSx, textAlign: 'left', pl: 2 }}>
                   {entry.rank}
+                  {frozen && idx < THIRD_PLACE_QUALIFIERS && <QualifiedMarker />}
                 </Box>
                 <Box component="td" sx={{ ...tdSx, textAlign: 'left' }}>
                   <TeamCell entry={entry} />

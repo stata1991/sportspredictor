@@ -8,11 +8,14 @@ import {
   Typography,
   Button,
 } from '@mui/material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import { useStandings } from '../../football/hooks/useStandings';
 import { StandingEntry } from '../../football/types/standings';
 import { flagClass } from '../../football/utils/countryFlag';
 import { partitionStandings } from '../../football/utils/partitionStandings';
+import { isGroupStageComplete } from '../../football/utils/groupStageComplete';
 import ThirdPlaceRankingCard from '../../football/components/ThirdPlaceRankingCard';
+import QualifiedMarker from '../../football/components/QualifiedMarker';
 import { colors } from '../../football/colors';
 
 const TeamCell: React.FC<{ entry: StandingEntry }> = ({ entry }) => {
@@ -55,7 +58,10 @@ const tdSx = {
   borderBottom: '1px solid rgba(255,255,255,0.04)',
 };
 
-const GroupCard: React.FC<{ group: StandingEntry[] }> = ({ group }) => {
+const GroupCard: React.FC<{ group: StandingEntry[]; frozen?: boolean }> = ({
+  group,
+  frozen,
+}) => {
   const groupName = group[0]?.group ?? 'Group';
 
   return (
@@ -93,10 +99,11 @@ const GroupCard: React.FC<{ group: StandingEntry[] }> = ({ group }) => {
             </tr>
           </thead>
           <tbody>
-            {group.map((entry) => (
+            {group.map((entry, idx) => (
               <tr key={entry.team.id}>
                 <Box component="td" sx={{ ...tdSx, textAlign: 'left', pl: 2 }}>
                   {entry.rank}
+                  {frozen && idx < 2 && <QualifiedMarker />}
                 </Box>
                 <Box component="td" sx={{ ...tdSx, textAlign: 'left' }}>
                   <TeamCell entry={entry} />
@@ -192,6 +199,11 @@ const StandingsContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
     [groups],
   );
 
+  const frozen = useMemo(
+    () => isGroupStageComplete(realGroups),
+    [realGroups],
+  );
+
   if (loading) {
     return (
       <Box data-testid="standings-loading">
@@ -228,15 +240,40 @@ const StandingsContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
 
   return (
     <>
+      {frozen && (
+        <Box
+          data-testid="group-stage-complete-banner"
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1,
+            mb: 3,
+            px: 2,
+            py: 1,
+            borderRadius: 2,
+            backgroundColor: 'rgba(255, 111, 0, 0.12)',
+            border: `1px solid ${colors.homeAccent}`,
+          }}
+        >
+          <CheckCircleIcon sx={{ fontSize: '1rem', color: colors.homeAccent }} />
+          <Typography
+            variant="subtitle2"
+            sx={{ fontWeight: 700, color: colors.textPrimary }}
+          >
+            Group Stage Complete — knockout bracket is set
+          </Typography>
+        </Box>
+      )}
       <Grid container spacing={2} data-testid="standings-grid">
         {realGroups.map((group, i) => (
           <Grid key={group[0]?.group ?? i} size={{ xs: 12, sm: 6 }}>
-            <GroupCard group={group} />
+            <GroupCard group={group} frozen={frozen} />
           </Grid>
         ))}
       </Grid>
       {thirdPlaceRanking && (
-        <ThirdPlaceRankingCard entries={thirdPlaceRanking} />
+        <ThirdPlaceRankingCard entries={thirdPlaceRanking} frozen={frozen} />
       )}
     </>
   );
