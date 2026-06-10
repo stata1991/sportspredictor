@@ -17,6 +17,8 @@ from backend.football.predictions.derivations import (
     derive_ht_score,
     derive_total_goals,
     derive_winner,
+    is_knockout_round,
+    redistribute_draw_to_winners,
 )
 from backend.football.predictions.schemas import (
     FirstToScorePayload,
@@ -108,6 +110,38 @@ def detect_stage(
     return FixtureStage.NOT_PREDICTABLE
 
 
+# ── Knockout redistribution ───────────────────────────────────────────
+
+
+def _redistribute_winner_for_knockout(winner: WinnerPayload) -> WinnerPayload:
+    """Return a binary (knockout) copy of a ternary winner payload.
+
+    The 90-minute ternary values are preserved in the ``*_90`` fields.
+    The surfaced ``p_home_win`` / ``p_away_win`` are renormalised so they
+    sum to exactly 1.0 — a no-op when the ternary inputs already sum to
+    1.0, but it absorbs the ~1e-6 float dust introduced by upstream 6-dp
+    rounding of the engine's probabilities.
+    """
+    home_ko, away_ko = redistribute_draw_to_winners(
+        winner.p_home_win, winner.p_draw, winner.p_away_win
+    )
+    total = home_ko + away_ko
+    if total > 0.0:
+        home_ko, away_ko = home_ko / total, away_ko / total
+    assert abs((home_ko + away_ko) - 1.0) < 1e-9, (
+        f"knockout win probabilities must sum to 1.0, got {home_ko + away_ko}"
+    )
+    return winner.model_copy(update={
+        "p_home_win": round(home_ko, 6),
+        "p_draw": 0.0,
+        "p_away_win": round(away_ko, 6),
+        "is_knockout": True,
+        "p_home_win_90": winner.p_home_win,
+        "p_draw_90": winner.p_draw,
+        "p_away_win_90": winner.p_away_win,
+    })
+
+
 # ── Engine ────────────────────────────────────────────────────────────
 
 
@@ -131,6 +165,7 @@ class PredictionEngine:
         status_short: str,
         *,
         has_lineups: bool = False,
+        round_str: str | None = None,
     ) -> PredictionBundle:
         """Generate all predictions for a fixture.
 
@@ -142,6 +177,12 @@ class PredictionEngine:
             Fixture status short code (e.g. ``"NS"``, ``"1H"``, ``"FT"``).
         has_lineups:
             Whether lineups are available for this fixture.
+        round_str:
+            API-Football ``league.round`` string.  For knockout rounds
+            (see :func:`is_knockout_round`) the draw probability is
+            redistributed into the two win probabilities so the surfaced
+            winner prediction is binary.  Group-stage and unknown rounds
+            keep their ternary probabilities.
 
         Returns
         -------
@@ -171,6 +212,11 @@ class PredictionEngine:
 
         # Derive all four prediction types.
         winner = WinnerPayload(**derive_winner(raw))
+
+        # Knockout fixtures cannot draw — redistribute draw mass into the
+        # two win probabilities so the surfaced prediction is binary.
+        if is_knockout_round(round_str):
+            winner = _redistribute_winner_for_knockout(winner)
         total_goals = TotalGoalsPayload(**derive_total_goals(scoreline_matrix))
         ht_score = HTScorePayload(
             **derive_ht_score(self.model, home_team_id, away_team_id)

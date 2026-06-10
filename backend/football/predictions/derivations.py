@@ -50,6 +50,60 @@ def derive_winner(match_result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ── Knockout-stage redistribution ─────────────────────────────────────
+
+# The exact set of knockout round strings, as they appear in
+# API-Football's ``league.round`` for the 2026 World Cup.  Group-stage
+# rounds ("Group Stage - 1/2/3") and any unrecognised string are treated
+# as NON-knockout (ternary).  The frontend mirrors this list in KO-2.
+KNOCKOUT_ROUNDS: frozenset[str] = frozenset({
+    "Round of 32",
+    "Round of 16",
+    "Quarter-finals",
+    "Semi-finals",
+    "3rd Place Final",
+    "Final",
+})
+
+
+def is_knockout_round(round_str: str | None) -> bool:
+    """True iff ``round_str`` names a knockout round.
+
+    Knockout fixtures cannot end in a draw — extra time and penalties
+    decide them — so their surfaced win probabilities are binary.  Any
+    value outside :data:`KNOCKOUT_ROUNDS` (group-stage rounds, ``None``,
+    and unknown strings) is treated as a group-stage (ternary) fixture.
+    """
+    return round_str in KNOCKOUT_ROUNDS
+
+
+def redistribute_draw_to_winners(
+    p_home_win: float,
+    p_draw: float,
+    p_away_win: float,
+) -> tuple[float, float]:
+    """Redistribute draw probability into binary win probabilities.
+
+    Splits the draw mass between the two sides *proportionally* to their
+    90-minute win probabilities::
+
+        home_ko = p_home_win + p_draw * p_home_win / (p_home_win + p_away_win)
+        away_ko = p_away_win + p_draw * p_away_win / (p_home_win + p_away_win)
+
+    The two results sum to ``p_home_win + p_draw + p_away_win`` (i.e. 1.0
+    for a valid ternary input).  When both win probabilities are zero — a
+    degenerate certain-draw input — the draw is split 50/50.
+
+    Returns ``(home_win_ko, away_win_ko)``.
+    """
+    denom = p_home_win + p_away_win
+    if denom == 0.0:
+        return 0.5, 0.5
+    home_ko = p_home_win + p_draw * p_home_win / denom
+    away_ko = p_away_win + p_draw * p_away_win / denom
+    return home_ko, away_ko
+
+
 # ── Total goals ───────────────────────────────────────────────────────
 
 

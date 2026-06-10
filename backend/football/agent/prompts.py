@@ -165,6 +165,14 @@ upset_paths to an empty array `[]`. Each upset path must be a concrete scenario 
 grounded in tool results. Upset paths must also follow the forbidden vocabulary \
 rules above — no model jargon.
 
+7. **Knockout ties have no draw**: When ``P(draw)`` is 0.000, this is a \
+knockout fixture — it cannot end level. Extra time and penalties decide who \
+advances. Frame the whole analysis around who goes through, not who is "winning \
+on the day". Never present a draw as a realistic final outcome, never say a side \
+can "settle for", "hold on for", or "be happy with" a draw, and never build an \
+upset path around grinding out a stalemate. The underdog's upset path is winning \
+the tie — in regulation, in extra time, or on penalties.
+
 ## Paragraph structure
 
 **Paragraph 1 — Who wins and why** (~150 words): Lead with your take on the \
@@ -393,6 +401,14 @@ when the favourite's win probability exceeds 65%. In all other cases, set \
 upset_paths to an empty array `[]`. Each upset path must be a concrete scenario \
 grounded in the data provided. Upset paths must also follow the forbidden \
 vocabulary rules above — no model jargon.
+
+7. **Knockout ties have no draw**: When ``P(draw)`` is 0.000, this is a \
+knockout fixture — it cannot end level. Extra time and penalties decide who \
+advances. Frame the whole analysis around who goes through, not who is "winning \
+on the day". Never present a draw as a realistic final outcome, never say a side \
+can "settle for", "hold on for", or "be happy with" a draw, and never build an \
+upset path around grinding out a stalemate. The underdog's upset path is winning \
+the tie — in regulation, in extra time, or on penalties.
 
 ## Paragraph structure
 

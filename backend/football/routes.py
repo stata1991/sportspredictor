@@ -520,7 +520,11 @@ async def predict_pre_match(
     # ── Generate fresh predictions ──────────────────────────────
     with timed_step("dixon_coles", fixture_id=fixture_id):
         engine = _get_engine()
-        bundle = engine.predict(home_id, away_id, status, has_lineups=has_lineups)
+        bundle = engine.predict(
+            home_id, away_id, status,
+            has_lineups=has_lineups,
+            round_str=fx.league.round,
+        )
 
     # ── Persist deterministic predictions ─────────────────────
     # Commit BEFORE reasoning so agent failure can't roll back.
@@ -1018,7 +1022,9 @@ async def _warm_fixtures_background(
                         # ── Generate predictions (same path as predict_pre_match) ──
                         engine = _get_engine()
                         bundle = engine.predict(
-                            home_id, away_id, status, has_lineups=has_lineups,
+                            home_id, away_id, status,
+                            has_lineups=has_lineups,
+                            round_str=fx.league.round,
                         )
                         await save_prediction_bundle(session, fixture_id, bundle)
                         await session.commit()

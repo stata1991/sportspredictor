@@ -21,7 +21,17 @@ class FixtureStage(str, Enum):
 
 
 class WinnerPayload(BaseModel):
-    """Winner / match-result prediction payload."""
+    """Winner / match-result prediction payload.
+
+    Group-stage fixtures carry ternary probabilities (home / draw / away)
+    and ``is_knockout`` is False.
+
+    Knockout fixtures redistribute the draw mass into the two win
+    probabilities (see ``redistribute_draw_to_winners``): the surfaced
+    ``p_home_win`` / ``p_away_win`` are binary and sum to 1.0, ``p_draw``
+    is 0.0, ``is_knockout`` is True, and the original 90-minute ternary
+    values are retained in the ``*_90`` fields for debugging.
+    """
 
     p_home_win: float
     p_draw: float
@@ -30,6 +40,13 @@ class WinnerPayload(BaseModel):
     lambda_away: float
     scoreline_matrix: list[list[float]]  # 8×8
     confidence: str  # "normal" | "low_data"
+
+    # Knockout redistribution (additive; defaults preserve group-stage shape
+    # and keep historic cached payloads parseable — no migration required).
+    is_knockout: bool = False
+    p_home_win_90: float | None = None
+    p_draw_90: float | None = None
+    p_away_win_90: float | None = None
 
 
 class TotalGoalsPayload(BaseModel):
