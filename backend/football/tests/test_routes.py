@@ -114,6 +114,63 @@ def _make_prediction_row(
     return row
 
 
+# ── Fixtures list: live-aware caching (LIVE-1) ───────────────────────
+
+
+class TestListFixturesLiveCache:
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        self.mock_client = MagicMock()
+
+        async def _override_client():
+            return self.mock_client
+
+        _app.dependency_overrides.clear()
+        from backend.football.deps import get_football_client
+
+        _app.dependency_overrides[get_football_client] = _override_client
+        yield
+        _app.dependency_overrides.clear()
+
+    async def test_live_query_uses_short_cache_and_live_flag(self):
+        self.mock_client.get_fixtures = AsyncMock(
+            return_value=[_make_fixture(status_short="NS")]
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/fixtures?live=1")
+
+        assert resp.status_code == 200
+        assert "max-age=15" in resp.headers["cache-control"]
+        _, kwargs = self.mock_client.get_fixtures.call_args
+        assert kwargs.get("live") is True
+
+    async def test_normal_request_no_live_uses_long_cache(self):
+        self.mock_client.get_fixtures = AsyncMock(
+            return_value=[_make_fixture(status_short="NS")]
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/fixtures")
+
+        assert "max-age=300" in resp.headers["cache-control"]
+        _, kwargs = self.mock_client.get_fixtures.call_args
+        assert kwargs.get("live") is False
+
+    async def test_in_play_fixture_forces_short_cache_even_without_live_query(self):
+        self.mock_client.get_fixtures = AsyncMock(
+            return_value=[_make_fixture(status_short="1H", elapsed=30)]
+        )
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/fixtures")
+
+        assert "max-age=15" in resp.headers["cache-control"]
+
+
 # ── Pre-match endpoint ───────────────────────────────────────────────
 
 

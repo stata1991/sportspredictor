@@ -131,32 +131,34 @@ describe('getRoundCategories', () => {
   });
 });
 
+// Pin "now" so these date-relative assertions are stable regardless of the
+// real calendar date (they used to flip once the clock crossed into the
+// tournament). Only the system clock is faked; timers are left real.
+const FIXED_NOW = new Date('2026-06-15T12:00:00Z');
+const TODAY_ISO = '2026-06-15T12:00:00Z'; // same calendar day as FIXED_NOW
+
 describe('getDefaultRound', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(FIXED_NOW);
+  });
+  afterEach(() => jest.useRealTimers());
+
   test('selects round with matches today', () => {
-    const today = new Date();
-    today.setHours(18, 0, 0, 0);
-    const todayISO = today.toISOString();
-
     const groups = groupFixturesByRound([
-      makeFixture(1, '2026-06-11T12:00:00Z', 'Group Stage - 1'),
-      makeFixture(2, todayISO, 'Group Stage - 2'),
+      makeFixture(1, '2026-06-11T12:00:00Z', 'Group Stage - 1'), // before now
+      makeFixture(2, TODAY_ISO, 'Group Stage - 2'), // today (pinned)
     ]);
-
-    const result = getDefaultRound(groups);
-    expect(result).toBe('Group Stage - 2');
+    expect(getDefaultRound(groups)).toBe('Group Stage - 2');
   });
 
   test('selects first round with future matches when none today', () => {
-    const future = new Date(Date.now() + 86400000 * 30);
-    const futureISO = future.toISOString();
-
+    const futureISO = new Date(FIXED_NOW.getTime() + 86400000 * 30).toISOString();
     const groups = groupFixturesByRound([
       makeFixture(1, '2020-01-01T12:00:00Z', 'Group Stage - 1'),
       makeFixture(2, futureISO, 'Group Stage - 2'),
     ]);
-
-    const result = getDefaultRound(groups);
-    expect(result).toBe('Group Stage - 2');
+    expect(getDefaultRound(groups)).toBe('Group Stage - 2');
   });
 
   test('selects last round when all in past', () => {
@@ -164,9 +166,7 @@ describe('getDefaultRound', () => {
       makeFixture(1, '2020-01-01T12:00:00Z', 'Group Stage - 1'),
       makeFixture(2, '2020-02-01T12:00:00Z', 'Final'),
     ]);
-
-    const result = getDefaultRound(groups);
-    expect(result).toBe('Final');
+    expect(getDefaultRound(groups)).toBe('Final');
   });
 
   test('returns empty string for empty groups', () => {
@@ -175,20 +175,20 @@ describe('getDefaultRound', () => {
 });
 
 describe('getDefaultDate', () => {
-  test('returns today key when round has matches today', () => {
-    const today = new Date();
-    today.setHours(18, 0, 0, 0);
-    const todayISO = today.toISOString();
-    const todayKey = toLocalDateKey(todayISO);
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(FIXED_NOW);
+  });
+  afterEach(() => jest.useRealTimers());
 
-    const fixtures = [makeFixture(1, todayISO, 'Group Stage - 1')];
-    expect(getDefaultDate(fixtures)).toBe(todayKey);
+  test('returns today key when round has matches today', () => {
+    const fixtures = [makeFixture(1, TODAY_ISO, 'Group Stage - 1')];
+    expect(getDefaultDate(fixtures)).toBe(toLocalDateKey(TODAY_ISO));
   });
 
   test('returns all when round has no matches today', () => {
-    const fixtures = [
-      makeFixture(1, '2026-06-11T12:00:00Z', 'Group Stage - 1'),
-    ];
+    // A fixture on a day other than the pinned "today".
+    const fixtures = [makeFixture(1, '2026-06-11T12:00:00Z', 'Group Stage - 1')];
     expect(getDefaultDate(fixtures)).toBe('all');
   });
 });

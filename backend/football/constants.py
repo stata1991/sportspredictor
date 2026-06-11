@@ -32,6 +32,9 @@ HEADER_RATE_LIMIT_MINUTE_REMAINING = "x-ratelimit-remaining"
 # ── Cache TTLs (seconds) per endpoint type ───────────────────────────
 ENDPOINT_TTLS: Final[dict[str, int]] = {
     "fixtures_list": 3_600,
+    # Live-aware fixtures list: short cache so in-play score/minute stay fresh
+    # while at least one match is live (the frontend polls with ?live=1).
+    "fixtures_list_live": 30,
     "fixture_detail_prematch": 300,
     "fixture_detail_live": 15,
     "lineups_prematch": 30,

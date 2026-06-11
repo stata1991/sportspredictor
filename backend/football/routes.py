@@ -69,6 +69,7 @@ router = APIRouter()
 # These drive CloudFront / browser caching via Cache-Control headers.
 
 _CC_FIXTURES_LIST = 300      # 5 min  — schedule changes infrequently
+_CC_FIXTURES_LIVE = 15       # 15 s   — fixtures list while a match is live
 _CC_FIXTURE_NS = 300         # 5 min  — not started, low volatility
 _CC_FIXTURE_LIVE = 30        # 30 s   — in-play, high volatility
 _CC_FIXTURE_COMPLETED = 86400  # 24 h — result is final
@@ -82,6 +83,10 @@ _CC_LIVE_PRED = 30           # 30 s   — real-time
 _CC_REASONING = 300          # 5 min  — stable once generated
 _CC_HISTORY = 120            # 2 min  — append-only, moderate
 _CC_ACCURACY = 300           # 5 min  — computed periodically
+
+
+# In-play fixture statuses (mirrors engine._LIVE) for live-aware caching.
+_LIVE_STATUSES = frozenset({"1H", "2H", "HT", "ET", "BT", "P", "LIVE"})
 
 
 def _set_cache(response: Response, max_age: int) -> None:
@@ -187,15 +192,33 @@ async def list_fixtures(
     response: Response,
     league: int = WC_LEAGUE_ID,
     season: int = WC_SEASON,
+    live: bool = Query(False),
     client: APIFootballClient = Depends(get_football_client),
 ) -> dict:
-    """List all fixtures for a league/season."""
+    """List all fixtures for a league/season.
+
+    ``live=1`` (sent by the frontend only while a match is in play and the
+    tab is visible) shortens both the upstream cache TTL and the
+    ``Cache-Control`` so in-play score/minute stay fresh. Score/status only —
+    this endpoint carries no prediction values.
+    """
     try:
-        fixtures = await client.get_fixtures(league=league, season=season)
+        fixtures = await client.get_fixtures(
+            league=league, season=season, live=live,
+        )
     except APIFootballError as exc:
         _raise_for_football_error(exc)
 
-    _set_cache(response, _CC_FIXTURES_LIST)
+    # Short Cache-Control whenever the request is a live poll OR the response
+    # actually contains an in-play fixture (so a normal load during a match
+    # isn't frozen by the browser/CDN for 5 minutes).
+    live_present = any(
+        fx.fixture.status.short in _LIVE_STATUSES for fx in fixtures
+    )
+    _set_cache(
+        response,
+        _CC_FIXTURES_LIVE if (live or live_present) else _CC_FIXTURES_LIST,
+    )
     return {
         "count": len(fixtures),
         "fixtures": [fx.model_dump(mode="json") for fx in fixtures],

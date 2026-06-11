@@ -374,13 +374,26 @@ class APIFootballClient:
         self,
         league: int = WC_LEAGUE_ID,
         season: int = WC_SEASON,
+        *,
+        live: bool = False,
     ) -> list[AFFixture]:
-        """List all fixtures for a league/season."""
+        """List all fixtures for a league/season.
+
+        When ``live`` is True the response is cached with a short TTL
+        (``fixtures_list_live``) so in-play score/minute stay fresh during a
+        match; otherwise the long schedule TTL applies. Same cache key either
+        way, so live polling keeps the shared entry warm for all readers.
+        """
+        ttl = (
+            ENDPOINT_TTLS["fixtures_list_live"]
+            if live
+            else ENDPOINT_TTLS["fixtures_list"]
+        )
         items = await self._request(
             "/fixtures",
             {"league": league, "season": season},
             cache_method="fixtures",
-            ttl=ENDPOINT_TTLS["fixtures_list"],
+            ttl=ttl,
         )
         return [AFFixture.model_validate(item) for item in items]
 

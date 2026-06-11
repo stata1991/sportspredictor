@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Routes, Route, Outlet } from 'react-router-dom';
 import { HelmetProvider } from 'react-helmet-async';
@@ -140,7 +140,9 @@ describe('SchedulePage', () => {
     ];
     renderWithContext({ fixtures });
 
-    // Both fixtures in Matchday 1 should be visible initially (All selected)
+    // Select 'All' explicitly so this is independent of today's date (the
+    // default date is "today" when a fixture is today, else 'all').
+    await userEvent.click(screen.getByText('All'));
     expect(screen.getByText('France')).toBeInTheDocument();
     expect(screen.getByText('USA')).toBeInTheDocument();
 
@@ -211,5 +213,47 @@ describe('SchedulePage', () => {
     // Click inside the card action area (contains the team name)
     await userEvent.click(screen.getByText('France'));
     expect(onFixtureClick).toHaveBeenCalledWith(42);
+  });
+
+  test('card reflects updated score after a poll tick (shared fixtures change)', async () => {
+    // A live fixture; a poll tick updates the shared outlet fixtures[].
+    const liveFixture = (home: number, away: number): AFFixture => {
+      const f = makeFixture(1, 'France', 'Germany', 'Group Stage - 1');
+      return {
+        ...f,
+        fixture: {
+          ...f.fixture,
+          status: { ...f.fixture.status, short: '1H', elapsed: 20 },
+        },
+        goals: { home, away },
+      };
+    };
+
+    const ctx = (fixtures: AFFixture[]): WorldCupOutletContext => ({
+      fixtures, loading: false, error: null,
+      onRetry: jest.fn(), onFixtureClick: jest.fn(),
+    });
+
+    const tree = (fixtures: AFFixture[]) => (
+      <HelmetProvider>
+        <MemoryRouter initialEntries={['/test']}>
+          <Routes>
+            <Route path="/test" element={<ContextWrapper context={ctx(fixtures)} />}>
+              <Route index element={<SchedulePage />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </HelmetProvider>
+    );
+
+    const { rerender } = render(tree([liveFixture(0, 0)]));
+    await userEvent.click(screen.getByText('All'));
+    expect(screen.getByTestId('fixture-card').textContent).toMatch(/0\s*[–-]\s*0/);
+
+    // Poll tick: shared fixtures now show 1-0.
+    rerender(tree([liveFixture(1, 0)]));
+    await waitFor(() => {
+      expect(screen.getByTestId('fixture-card').textContent).toMatch(/1\s*[–-]\s*0/);
+    });
   });
 });
