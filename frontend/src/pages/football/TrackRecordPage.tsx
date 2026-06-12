@@ -1,110 +1,138 @@
-import React from 'react';
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  Skeleton,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-} from '@mui/material';
-import { useAccuracy } from '../../football/hooks/useAccuracy';
+import React, { useState, useCallback, useMemo } from 'react';
+import { Box, Typography, Card, Skeleton, Button, Chip } from '@mui/material';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
+import { useAccuracyMatches } from '../../football/hooks/useAccuracyMatches';
+import { roundShortLabel } from '../../football/utils/roundLabel';
+import { MatchReceipt } from '../../football/types/accuracy';
 import { colors } from '../../football/colors';
-import { AccuracyRollup } from '../../football/types/accuracy';
 
-const WINDOW_LABELS: Record<string, string> = {
-  all_time: 'All Time',
-  last_7d: 'Last 7 Days',
-};
+// ── Hit / miss markers (orange check / pink cross — NO GREEN) ─────────
 
-const TYPE_LABELS: Record<string, string> = {
-  winner: 'Winner',
-  total_goals: 'Total Goals',
-};
-
-const formatPercent = (value: number | null): string =>
-  value != null ? `${(value * 100).toFixed(0)}%` : '--';
-
-const formatDecimal = (value: number | null): string =>
-  value != null ? value.toFixed(3) : '--';
-
-// ── KPI card ──────────────────────────────────────────────────────────
-
-const KpiCard: React.FC<{
-  label: string;
-  value: string;
-  subtitle: string;
-}> = ({ label, value, subtitle }) => (
-  <Card
-    data-testid="kpi-card"
-    sx={{
-      flex: '1 1 180px',
-      background: 'linear-gradient(145deg, #1e1e1e, #2a2a2a)',
-      border: '1px solid rgba(255,255,255,0.06)',
-    }}
-  >
-    <CardContent sx={{ textAlign: 'center' }}>
-      <Typography
-        variant="caption"
-        sx={{ color: colors.labelText, fontWeight: 600 }}
-      >
-        {label}
-      </Typography>
-      <Typography
-        variant="h4"
-        data-testid="kpi-value"
-        sx={{ color: colors.textPrimary, fontWeight: 800, my: 1 }}
-      >
-        {value}
-      </Typography>
-      <Typography variant="caption" sx={{ color: colors.labelText }}>
-        {subtitle}
-      </Typography>
-    </CardContent>
-  </Card>
+const HitMark: React.FC = () => (
+  <CheckCircleIcon
+    data-testid="hit-mark"
+    aria-label="correct"
+    sx={{ fontSize: '1rem', color: colors.homeAccent, verticalAlign: 'middle', ml: 0.5 }}
+  />
 );
 
-// ── Table cell with consistent styling ────────────────────────────────
-
-const borderStyle = 'rgba(255,255,255,0.08)';
-
-const StyledCell: React.FC<{
-  children: React.ReactNode;
-  highlight?: boolean;
-  header?: boolean;
-}> = ({ children, highlight, header }) => (
-  <TableCell
-    sx={{
-      color: highlight ? colors.homeAccent : header ? colors.labelText : colors.textPrimary,
-      fontWeight: highlight || header ? 700 : 400,
-      borderColor: borderStyle,
-      ...(header && { fontSize: '0.75rem' }),
-    }}
-  >
-    {children}
-  </TableCell>
+const MissMark: React.FC = () => (
+  <CancelIcon
+    data-testid="miss-mark"
+    aria-label="wrong"
+    sx={{ fontSize: '1rem', color: colors.awayAccent, verticalAlign: 'middle', ml: 0.5 }}
+  />
 );
 
-// ── Main component ────────────────────────────────────────────────────
+const goalsWord = (n: number) => `${n} goal${n === 1 ? '' : 's'}`;
 
-const TrackRecordPage: React.FC = () => {
-  const { rollups, loading, error } = useAccuracy();
+// ── One match receipt card ────────────────────────────────────────────
+
+const MatchCard: React.FC<{ m: MatchReceipt }> = ({ m }) => {
+  const roundLabel = m.is_friendly ? null : roundShortLabel(m.round);
+
+  return (
+    <Card
+      data-testid="match-receipt"
+      sx={{
+        mb: 1.5,
+        p: { xs: 1.5, sm: 2 },
+        background: 'linear-gradient(145deg, #1e1e1e, #2a2a2a)',
+        border: '1px solid rgba(255,255,255,0.06)',
+      }}
+    >
+      {/* Badge row */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, minHeight: 22 }}>
+        {m.is_friendly && (
+          <Chip
+            label="Warm-up"
+            size="small"
+            data-testid="warmup-chip"
+            sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700,
+                  color: colors.darkText, backgroundColor: colors.labelText }}
+          />
+        )}
+        {roundLabel && (
+          <Chip
+            label={roundLabel}
+            size="small"
+            data-testid="round-badge"
+            sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.5px',
+                  color: colors.darkText, backgroundColor: colors.labelText }}
+          />
+        )}
+      </Box>
+
+      {/* Teams + final score */}
+      <Typography
+        variant="subtitle1"
+        sx={{ fontWeight: 700, color: colors.textPrimary, mb: 0.75 }}
+      >
+        {m.home_team} <Box component="span" sx={{ color: colors.labelText }}>{m.final_score}</Box> {m.away_team}
+      </Typography>
+
+      {/* Called line */}
+      {m.winner_correct !== null && (
+        <Typography
+          variant="body2"
+          data-testid="called-line"
+          sx={{ color: colors.textSecondary, display: 'flex', alignItems: 'center' }}
+        >
+          Called: {m.winner_pick}
+          {m.winner_correct ? <HitMark /> : <MissMark />}
+          {!m.winner_correct && m.winner_actual && (
+            <Box component="span" sx={{ color: colors.labelText, ml: 0.75 }}>
+              ({m.winner_actual === 'Draw' ? 'drawn' : `${m.winner_actual} won`})
+            </Box>
+          )}
+        </Typography>
+      )}
+
+      {/* Goals line */}
+      {m.goals_correct !== null && (
+        <Typography
+          variant="body2"
+          data-testid="goals-line"
+          sx={{ color: colors.textSecondary, display: 'flex', alignItems: 'center' }}
+        >
+          Goals: {m.goals_pick}
+          {m.goals_correct ? <HitMark /> : <MissMark />}
+          <Box component="span" sx={{ color: colors.labelText, ml: 0.75 }}>
+            ({goalsWord(m.goals_actual)})
+          </Box>
+        </Typography>
+      )}
+    </Card>
+  );
+};
+
+// ── Content (remounts on retry) ───────────────────────────────────────
+
+const TrackRecordContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
+  const { matches, loading, error } = useAccuracyMatches();
+
+  const headline = useMemo(() => {
+    const winnerEval = matches.filter((m) => m.winner_correct !== null);
+    const winnerHits = winnerEval.filter((m) => m.winner_correct === true).length;
+    const goalsEval = matches.filter((m) => m.goals_correct !== null);
+    const goalsHits = goalsEval.filter((m) => m.goals_correct === true).length;
+    const pct = winnerEval.length
+      ? Math.round((winnerHits / winnerEval.length) * 100)
+      : 0;
+    return { winnerHits, winnerTotal: winnerEval.length, pct, goalsHits, goalsTotal: goalsEval.length };
+  }, [matches]);
 
   if (loading) {
     return (
       <Box data-testid="loading-state">
-        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 3 }}>
-          {[0, 1, 2].map((i) => (
-            <Card key={i} sx={{ flex: '1 1 180px', p: 2 }}>
-              <Skeleton variant="text" width="50%" />
-              <Skeleton variant="text" width="60%" height={48} />
-              <Skeleton variant="text" width="70%" />
-            </Card>
-          ))}
-        </Box>
+        {[0, 1, 2].map((i) => (
+          <Card key={i} sx={{ mb: 1.5, p: 2 }}>
+            <Skeleton variant="text" width="40%" />
+            <Skeleton variant="text" width="60%" />
+            <Skeleton variant="text" width="50%" />
+          </Card>
+        ))}
       </Box>
     );
   }
@@ -113,16 +141,19 @@ const TrackRecordPage: React.FC = () => {
     return (
       <Box data-testid="error-state" sx={{ textAlign: 'center', py: 6 }}>
         <Typography variant="h6" sx={{ color: '#ef5350', mb: 1 }}>
-          Could not load accuracy data
+          Could not load the track record
         </Typography>
-        <Typography variant="body2" sx={{ color: '#b0bec5', mb: 3 }}>
+        <Typography variant="body2" sx={{ color: colors.labelText, mb: 3 }}>
           {error}
         </Typography>
+        <Button variant="contained" onClick={onRetry}>
+          Retry
+        </Button>
       </Box>
     );
   }
 
-  if (rollups.length === 0) {
+  if (matches.length === 0) {
     return (
       <Box data-testid="empty-state" sx={{ textAlign: 'center', py: 6 }}>
         <Typography variant="h6" sx={{ color: colors.labelText, mb: 1 }}>
@@ -135,74 +166,34 @@ const TrackRecordPage: React.FC = () => {
     );
   }
 
-  // KPI cards — sourced from all_time + winner rollup
-  const headline: AccuracyRollup | undefined = rollups.find(
-    (r) => r.window === 'all_time' && r.prediction_type === 'winner',
-  );
-
   return (
     <Box data-testid="track-record-content">
-      {headline && (
-        <Box
-          data-testid="kpi-section"
-          sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', mb: 4 }}
+      {/* Headline */}
+      <Box data-testid="headline" sx={{ mb: 3 }}>
+        <Typography
+          variant="h5"
+          sx={{ fontWeight: 800, color: colors.textPrimary }}
         >
-          <KpiCard
-            label="Top Pick Hit Rate"
-            value={formatPercent(headline.top_pick_hit_rate)}
-            subtitle="winners called right"
-          />
-          <KpiCard
-            label="Total Predictions"
-            value={String(headline.total_predictions)}
-            subtitle="all-time"
-          />
-          <KpiCard
-            label="Brier Score"
-            value={formatDecimal(headline.brier_score)}
-            subtitle="lower is better"
-          />
-        </Box>
-      )}
+          Winners called right: {headline.winnerHits} of {headline.winnerTotal}
+          {headline.winnerTotal > 0 && ` (${headline.pct}%)`}
+        </Typography>
+        <Typography variant="body2" sx={{ color: colors.labelText, mt: 0.5 }}>
+          Goals calls: {headline.goalsHits} of {headline.goalsTotal}
+        </Typography>
+      </Box>
 
-      <Typography
-        variant="subtitle1"
-        sx={{ fontWeight: 700, mb: 1, color: colors.textPrimary }}
-      >
-        Breakdown
-      </Typography>
-      <Table size="small" data-testid="accuracy-table">
-        <TableHead>
-          <TableRow>
-            <StyledCell header>Window</StyledCell>
-            <StyledCell header>Type</StyledCell>
-            <StyledCell header>Predictions</StyledCell>
-            <StyledCell header>Hit Rate</StyledCell>
-            <StyledCell header>Brier</StyledCell>
-            <StyledCell header>Log Loss</StyledCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {rollups.map((r) => (
-            <TableRow key={`${r.window}-${r.prediction_type}`}>
-              <StyledCell>
-                {WINDOW_LABELS[r.window] ?? r.window}
-              </StyledCell>
-              <StyledCell>
-                {TYPE_LABELS[r.prediction_type] ?? r.prediction_type}
-              </StyledCell>
-              <StyledCell>{r.total_predictions}</StyledCell>
-              <StyledCell highlight>
-                {formatPercent(r.top_pick_hit_rate)}
-              </StyledCell>
-              <StyledCell>{formatDecimal(r.brier_score)}</StyledCell>
-              <StyledCell>{formatDecimal(r.log_loss)}</StyledCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+      {/* Match list, newest first (payload order) */}
+      {matches.map((m) => (
+        <MatchCard key={m.fixture_id} m={m} />
+      ))}
     </Box>
   );
+};
+
+const TrackRecordPage: React.FC = () => {
+  const [retryKey, setRetryKey] = useState(0);
+  const handleRetry = useCallback(() => setRetryKey((k) => k + 1), []);
+  return <TrackRecordContent key={retryKey} onRetry={handleRetry} />;
 };
 
 export default TrackRecordPage;

@@ -14,3 +14,25 @@ export interface AccuracyResponse {
   rollups: AccuracyRollup[];
   message?: string;
 }
+
+// Types for GET /api/football/accuracy/matches (TRACK-2 receipts)
+
+export interface MatchReceipt {
+  fixture_id: number;
+  kickoff: string;
+  round: string | null;
+  home_team: string;
+  away_team: string;
+  final_score: string; // "2-0"
+  winner_pick: string | null;
+  winner_actual: string | null;
+  winner_correct: boolean | null;
+  goals_pick: string | null; // "Over 2.5" | "Under 2.5"
+  goals_actual: number;
+  goals_correct: boolean | null;
+  is_friendly: boolean;
+}
+
+export interface AccuracyMatchesResponse {
+  matches: MatchReceipt[];
+}

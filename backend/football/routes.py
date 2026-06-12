@@ -36,9 +36,11 @@ from backend.football.exceptions import (
     RateLimitError,
     UpstreamError,
 )
+from backend.football.evaluation.receipts import build_match_receipt
 from backend.football.persistence import (
     get_all_accuracy_rollups,
     get_cached_bundle,
+    get_evaluated_match_rows,
     get_cached_live_prediction,
     get_cached_reasoning,
     get_latest_predictions_for_fixture,
@@ -910,6 +912,26 @@ async def get_accuracy(
             for r in rollups
         ],
     }
+
+
+@router.get("/accuracy/matches")
+async def get_accuracy_matches(
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Match-wise Track Record receipts — what we called vs what happened.
+
+    One entry per fixture with an outcome, newest first, carrying the latest
+    winner + total-goals picks and their actuals. Display-only; the aggregate
+    /accuracy endpoint keeps the full statistical rollups.
+    """
+    rows = await get_evaluated_match_rows(session)
+    matches = [
+        build_match_receipt(outcome, winner_payload, goals_payload)
+        for (outcome, winner_payload, goals_payload) in rows
+    ]
+    _set_cache(response, _CC_ACCURACY)
+    return {"matches": matches}
 
 
 # ── Pre-warm admin endpoint ──────────────────────────────────────────

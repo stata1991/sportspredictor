@@ -19,7 +19,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -197,6 +197,7 @@ async def save_outcome(
     ht_home: int | None = None,
     ht_away: int | None = None,
     first_scorer_team: str | None = None,
+    round: str | None = None,
     kickoff_at: datetime,
 ) -> None:
     """Upsert a match outcome.
@@ -222,6 +223,7 @@ async def save_outcome(
         ht_home=ht_home,
         ht_away=ht_away,
         first_scorer_team=first_scorer_team,
+        round=round,
         kickoff_at=kickoff_at,
     )
 
@@ -567,6 +569,54 @@ async def get_latest_reasoning(
 
 
 # ── Accuracy rollups ─────────────────────────────────────────────────
+
+
+async def get_evaluated_match_rows(
+    session: AsyncSession,
+) -> list[tuple[Outcome, dict | None, dict | None]]:
+    """Per fixture with an outcome: ``(outcome, winner_payload, goals_payload)``,
+    newest first (by kickoff).
+
+    The payloads are the latest ``winner`` / ``total_goals`` prediction for the
+    fixture (None if absent). Powers the Track Record match-wise receipts.
+    """
+    display_types = ("winner", "total_goals")
+
+    latest_sub = (
+        select(
+            Prediction.fixture_id,
+            Prediction.prediction_type,
+            func.max(Prediction.made_at).label("max_made_at"),
+        )
+        .where(Prediction.prediction_type.in_(display_types))
+        .group_by(Prediction.fixture_id, Prediction.prediction_type)
+        .subquery()
+    )
+    pred_stmt = select(Prediction).join(
+        latest_sub,
+        and_(
+            Prediction.fixture_id == latest_sub.c.fixture_id,
+            Prediction.prediction_type == latest_sub.c.prediction_type,
+            Prediction.made_at == latest_sub.c.max_made_at,
+        ),
+    )
+    preds = (await session.execute(pred_stmt)).scalars().all()
+
+    by_fixture: dict[int, dict[str, dict]] = {}
+    for p in preds:
+        by_fixture.setdefault(p.fixture_id, {})[p.prediction_type] = p.payload
+
+    outcomes = (
+        await session.execute(
+            select(Outcome).order_by(Outcome.kickoff_at.desc())
+        )
+    ).scalars().all()
+
+    return [
+        (o, by_fixture.get(o.fixture_id, {}).get("winner"),
+         by_fixture.get(o.fixture_id, {}).get("total_goals"))
+        for o in outcomes
+    ]
 
 
 async def get_all_accuracy_rollups(

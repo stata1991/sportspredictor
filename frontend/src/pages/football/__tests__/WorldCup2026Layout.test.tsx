@@ -9,13 +9,17 @@ import LiveMatchPage from '../LiveMatchPage';
 import TrackRecordPage from '../TrackRecordPage';
 import * as useFixturesModule from '../../../football/hooks/useFixtures';
 import * as useAccuracyModule from '../../../football/hooks/useAccuracy';
+import * as useAccuracyMatchesModule from '../../../football/hooks/useAccuracyMatches';
 import { AFFixture } from '../../../football/types/fixture';
 
 jest.mock('../../../football/hooks/useFixtures');
 jest.mock('../../../football/hooks/useAccuracy');
+jest.mock('../../../football/hooks/useAccuracyMatches');
 
 const mockUseFixtures = useFixturesModule.useFixtures as jest.Mock;
 const mockUseAccuracy = useAccuracyModule.useAccuracy as jest.Mock;
+const mockUseAccuracyMatches =
+  useAccuracyMatchesModule.useAccuracyMatches as jest.Mock;
 
 function makeFixture(id: number, statusShort: string): AFFixture {
   return {
@@ -71,6 +75,11 @@ describe('WorldCup2026Layout', () => {
     });
     mockUseAccuracy.mockReturnValue({
       rollups: [],
+      loading: false,
+      error: null,
+    });
+    mockUseAccuracyMatches.mockReturnValue({
+      matches: [],
       loading: false,
       error: null,
     });

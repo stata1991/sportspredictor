@@ -1,163 +1,106 @@
 import React from 'react';
 import { render, screen, within } from '@testing-library/react';
-import { HelmetProvider } from 'react-helmet-async';
 import TrackRecordPage from '../TrackRecordPage';
-import * as useAccuracyModule from '../../../football/hooks/useAccuracy';
+import * as useAccuracyMatchesModule from '../../../football/hooks/useAccuracyMatches';
+import { MatchReceipt } from '../../../football/types/accuracy';
 
-jest.mock('../../../football/hooks/useAccuracy');
-const mockUseAccuracy = useAccuracyModule.useAccuracy as jest.Mock;
+jest.mock('../../../football/hooks/useAccuracyMatches');
+const mockHook = useAccuracyMatchesModule.useAccuracyMatches as jest.Mock;
+
+function receipt(over: Partial<MatchReceipt> = {}): MatchReceipt {
+  return {
+    fixture_id: 1, kickoff: '2026-06-11T19:00:00+00:00', round: 'Group Stage - 1',
+    home_team: 'Mexico', away_team: 'South Africa', final_score: '2-0',
+    winner_pick: 'Mexico', winner_actual: 'Mexico', winner_correct: true,
+    goals_pick: 'Under 2.5', goals_actual: 2, goals_correct: true,
+    is_friendly: false, ...over,
+  };
+}
+
+const set = (matches: MatchReceipt[]) =>
+  mockHook.mockReturnValue({ matches, loading: false, error: null });
+
+afterEach(() => jest.resetAllMocks());
 
 describe('TrackRecordPage', () => {
-  afterEach(() => {
-    jest.resetAllMocks();
-  });
-
   test('shows loading skeletons when loading', () => {
-    mockUseAccuracy.mockReturnValue({
-      rollups: [],
-      loading: true,
-      error: null,
-    });
-
-    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
+    mockHook.mockReturnValue({ matches: [], loading: true, error: null });
+    render(<TrackRecordPage />);
     expect(screen.getByTestId('loading-state')).toBeInTheDocument();
   });
 
-  test('shows error state when error set', () => {
-    mockUseAccuracy.mockReturnValue({
-      rollups: [],
-      loading: false,
-      error: 'Server error',
-    });
+  test('headline math is correct from the payload', () => {
+    set([
+      receipt({ fixture_id: 1, winner_correct: true, goals_correct: true }),
+      receipt({ fixture_id: 2, winner_correct: true, goals_correct: false }),
+      receipt({ fixture_id: 3, winner_correct: false, winner_pick: 'France',
+                winner_actual: 'Ivory Coast', goals_correct: true }),
+    ]);
+    render(<TrackRecordPage />);
 
-    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
-    expect(screen.getByTestId('error-state')).toBeInTheDocument();
-    expect(screen.getByText('Could not load accuracy data')).toBeInTheDocument();
+    const headline = screen.getByTestId('headline');
+    expect(headline).toHaveTextContent('Winners called right: 2 of 3 (67%)');
+    expect(headline).toHaveTextContent('Goals calls: 2 of 3');
   });
 
-  test('shows empty state when rollups is empty', () => {
-    mockUseAccuracy.mockReturnValue({
-      rollups: [],
-      loading: false,
-      error: null,
-    });
+  test('renders hit and miss markers', () => {
+    set([
+      receipt({ fixture_id: 1, winner_correct: true, goals_correct: true }),
+      receipt({ fixture_id: 2, winner_correct: false, winner_pick: 'France',
+                winner_actual: 'Ivory Coast', goals_correct: false }),
+    ]);
+    render(<TrackRecordPage />);
 
-    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
+    expect(screen.getAllByTestId('hit-mark').length).toBe(2);   // m1 winner+goals
+    expect(screen.getAllByTestId('miss-mark').length).toBe(2);  // m2 winner+goals
+  });
+
+  test('miss line names the actual winner', () => {
+    set([receipt({ winner_correct: false, winner_pick: 'France', winner_actual: 'Ivory Coast' })]);
+    render(<TrackRecordPage />);
+    expect(screen.getByTestId('called-line')).toHaveTextContent('Called: France');
+    expect(screen.getByTestId('called-line')).toHaveTextContent('(Ivory Coast won)');
+  });
+
+  test('WC match shows round badge; friendly shows Warm-up chip, no round badge', () => {
+    set([
+      receipt({ fixture_id: 1, is_friendly: false, round: 'Group Stage - 1' }),
+      receipt({ fixture_id: 2, is_friendly: true, round: 'Club Friendlies - 1' }),
+    ]);
+    render(<TrackRecordPage />);
+
+    const cards = screen.getAllByTestId('match-receipt');
+    expect(within(cards[0]).getByTestId('round-badge')).toHaveTextContent('MD1');
+    expect(within(cards[0]).queryByTestId('warmup-chip')).not.toBeInTheDocument();
+    expect(within(cards[1]).getByTestId('warmup-chip')).toBeInTheDocument();
+    expect(within(cards[1]).queryByTestId('round-badge')).not.toBeInTheDocument();
+  });
+
+  test('no statistical jargon appears anywhere on the page', () => {
+    set([receipt(), receipt({ fixture_id: 2, winner_correct: false, goals_correct: false })]);
+    const { container } = render(<TrackRecordPage />);
+    const text = container.textContent || '';
+    for (const forbidden of [
+      'Brier', 'log loss', 'Log Loss', 'first_to_score', 'ht_score',
+      'all_time', 'last_7d', 'last_30d',
+    ]) {
+      expect(text).not.toContain(forbidden);
+    }
+  });
+
+  test('empty state when no evaluated matches', () => {
+    set([]);
+    render(<TrackRecordPage />);
     expect(screen.getByTestId('empty-state')).toBeInTheDocument();
-    expect(screen.getByText('No accuracy data yet')).toBeInTheDocument();
+    expect(
+      screen.getByText('Track record will appear after completed matches are evaluated.'),
+    ).toBeInTheDocument();
   });
 
-  test('renders KPI cards from all_time + winner rollup', () => {
-    mockUseAccuracy.mockReturnValue({
-      rollups: [
-        {
-          window: 'all_time',
-          prediction_type: 'winner',
-          total_predictions: 42,
-          brier_score: 0.215,
-          log_loss: 0.68,
-          top_pick_hit_rate: 0.71,
-          computed_at: '2026-05-09T12:00:00Z',
-        },
-      ],
-      loading: false,
-      error: null,
-    });
-
-    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
-
-    const kpiSection = screen.getByTestId('kpi-section');
-    expect(kpiSection).toBeInTheDocument();
-    const kpiCards = screen.getAllByTestId('kpi-card');
-    expect(kpiCards).toHaveLength(3);
-
-    const kpi = within(kpiSection);
-    expect(kpi.getByText('Top Pick Hit Rate')).toBeInTheDocument();
-    expect(kpi.getByText('71%')).toBeInTheDocument();
-    expect(kpi.getByText('42')).toBeInTheDocument();
-    expect(kpi.getByText('0.215')).toBeInTheDocument();
+  test('error state renders retry', () => {
+    mockHook.mockReturnValue({ matches: [], loading: false, error: 'boom' });
+    render(<TrackRecordPage />);
+    expect(screen.getByTestId('error-state')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
-
-  test('hides KPI section when no all_time + winner rollup', () => {
-    mockUseAccuracy.mockReturnValue({
-      rollups: [
-        {
-          window: 'last_7d',
-          prediction_type: 'winner',
-          total_predictions: 8,
-          brier_score: 0.198,
-          log_loss: 0.62,
-          top_pick_hit_rate: 0.75,
-          computed_at: '2026-05-09T12:00:00Z',
-        },
-      ],
-      loading: false,
-      error: null,
-    });
-
-    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
-
-    expect(screen.queryByTestId('kpi-section')).not.toBeInTheDocument();
-    // Table still renders
-    expect(screen.getByTestId('accuracy-table')).toBeInTheDocument();
-  });
-
-  test('renders breakdown table with all rollups', () => {
-    mockUseAccuracy.mockReturnValue({
-      rollups: [
-        {
-          window: 'all_time',
-          prediction_type: 'winner',
-          total_predictions: 42,
-          brier_score: 0.215,
-          log_loss: 0.68,
-          top_pick_hit_rate: 0.71,
-          computed_at: null,
-        },
-        {
-          window: 'last_7d',
-          prediction_type: 'total_goals',
-          total_predictions: 8,
-          brier_score: 0.241,
-          log_loss: 0.71,
-          top_pick_hit_rate: 0.54,
-          computed_at: null,
-        },
-      ],
-      loading: false,
-      error: null,
-    });
-
-    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
-
-    expect(screen.getByTestId('accuracy-table')).toBeInTheDocument();
-    expect(screen.getByText('All Time')).toBeInTheDocument();
-    expect(screen.getByText('Last 7 Days')).toBeInTheDocument();
-    expect(screen.getByText('Winner')).toBeInTheDocument();
-    expect(screen.getByText('Total Goals')).toBeInTheDocument();
-  });
-
-  test('handles null metric values with dashes', () => {
-    mockUseAccuracy.mockReturnValue({
-      rollups: [
-        {
-          window: 'all_time',
-          prediction_type: 'winner',
-          total_predictions: 5,
-          brier_score: null,
-          log_loss: null,
-          top_pick_hit_rate: null,
-          computed_at: null,
-        },
-      ],
-      loading: false,
-      error: null,
-    });
-
-    render(<HelmetProvider><TrackRecordPage /></HelmetProvider>);
-
-    const dashes = screen.getAllByText('--');
-    expect(dashes.length).toBeGreaterThanOrEqual(3);
-  });
-
 });

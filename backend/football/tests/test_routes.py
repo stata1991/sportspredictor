@@ -1842,3 +1842,74 @@ class TestGetHeadToHead:
             resp = await ac.get("/api/football/head-to-head")
 
         assert resp.status_code == 422
+
+
+# ── Track Record receipts endpoint (TRACK-2) ─────────────────────────
+
+
+class TestAccuracyMatches:
+    @pytest.fixture(autouse=True)
+    def setup(self):
+        async def _override_session():
+            return MagicMock()
+
+        from backend.shared.db import get_session
+
+        _app.dependency_overrides.clear()
+        _app.dependency_overrides[get_session] = _override_session
+        yield
+        _app.dependency_overrides.clear()
+
+    async def test_returns_receipts_newest_first_passthrough(self):
+        from types import SimpleNamespace
+
+        def out(fid, ko):
+            return SimpleNamespace(
+                fixture_id=fid, home_team="Mexico", away_team="South Africa",
+                ft_home=2, ft_away=0, round="Group Stage - 1",
+                kickoff_at=datetime.fromisoformat(ko),
+            )
+
+        # Persistence returns newest-first; the route preserves order.
+        rows = [
+            (out(2, "2026-06-12T19:00:00+00:00"),
+             {"p_home_win": 0.6, "p_draw": 0.25, "p_away_win": 0.15},
+             {"over_2_5": 0.4, "under_2_5": 0.6}),
+            (out(1, "2026-06-11T19:00:00+00:00"),
+             {"p_home_win": 0.2, "p_draw": 0.3, "p_away_win": 0.5},
+             {"over_2_5": 0.6, "under_2_5": 0.4}),
+        ]
+
+        with patch(
+            "backend.football.routes.get_evaluated_match_rows",
+            new=AsyncMock(return_value=rows),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=_app), base_url="http://test"
+            ) as ac:
+                resp = await ac.get("/api/football/accuracy/matches")
+
+        assert resp.status_code == 200
+        matches = resp.json()["matches"]
+        assert [m["fixture_id"] for m in matches] == [2, 1]
+        # fid=2: home pick, home won (2-0), under pick, 2 goals → under.
+        assert matches[0]["winner_pick"] == "Mexico"
+        assert matches[0]["winner_correct"] is True
+        assert matches[0]["goals_pick"] == "Under 2.5"
+        assert matches[0]["goals_correct"] is True
+        # fid=1: away pick, but home won (2-0) → miss.
+        assert matches[1]["winner_pick"] == "South Africa"
+        assert matches[1]["winner_correct"] is False
+
+    async def test_empty_when_no_evaluated_matches(self):
+        with patch(
+            "backend.football.routes.get_evaluated_match_rows",
+            new=AsyncMock(return_value=[]),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=_app), base_url="http://test"
+            ) as ac:
+                resp = await ac.get("/api/football/accuracy/matches")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"matches": []}

@@ -199,6 +199,7 @@ async def run_ingest() -> dict:
                         ht_home=ht_home,
                         ht_away=ht_away,
                         first_scorer_team=first_scorer_team,
+                        round=fixture.league.round,
                         kickoff_at=fixture.fixture.date,
                     )
                     await session.commit()

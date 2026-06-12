@@ -76,6 +76,9 @@ class Outcome(Base):
     ht_home: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ht_away: Mapped[int | None] = mapped_column(Integer, nullable=True)
     first_scorer_team: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # API-Football league.round, captured at ingest. Powers the Track Record
+    # round badge and (soon) knockout evaluation. Nullable for old rows.
+    round: Mapped[str | None] = mapped_column(Text, nullable=True)
     kickoff_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False
     )
