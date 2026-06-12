@@ -62,18 +62,36 @@ describe('TrackRecordPage', () => {
     expect(screen.getByTestId('called-line')).toHaveTextContent('(Ivory Coast won)');
   });
 
-  test('WC match shows round badge; friendly shows Warm-up chip, no round badge', () => {
+  test('friendlies are filtered out of the list and headline (WC-only)', () => {
     set([
-      receipt({ fixture_id: 1, is_friendly: false, round: 'Group Stage - 1' }),
-      receipt({ fixture_id: 2, is_friendly: true, round: 'Club Friendlies - 1' }),
+      receipt({ fixture_id: 1, home_team: 'Mexico', is_friendly: false,
+                round: 'Group Stage - 1', winner_correct: true, goals_correct: true }),
+      receipt({ fixture_id: 2, home_team: 'Germany', is_friendly: true,
+                round: 'Club Friendlies - 1', winner_correct: true, goals_correct: false }),
     ]);
     render(<TrackRecordPage />);
 
+    // Only the WC match renders; the warm-up is absent from the DOM.
     const cards = screen.getAllByTestId('match-receipt');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].textContent).toContain('Mexico');
+    expect(document.body.textContent).not.toContain('Germany');
     expect(within(cards[0]).getByTestId('round-badge')).toHaveTextContent('MD1');
-    expect(within(cards[0]).queryByTestId('warmup-chip')).not.toBeInTheDocument();
-    expect(within(cards[1]).getByTestId('warmup-chip')).toBeInTheDocument();
-    expect(within(cards[1]).queryByTestId('round-badge')).not.toBeInTheDocument();
+    // The Warm-up chip is gone entirely (dead UI removed).
+    expect(screen.queryByTestId('warmup-chip')).not.toBeInTheDocument();
+    // Headline counts only the WC match.
+    expect(screen.getByTestId('headline')).toHaveTextContent('Winners called right: 1 of 1');
+    expect(screen.getByTestId('headline')).toHaveTextContent('Goals calls: 1 of 1');
+  });
+
+  test('only-friendlies payload renders the empty state', () => {
+    set([
+      receipt({ fixture_id: 1, is_friendly: true }),
+      receipt({ fixture_id: 2, is_friendly: true }),
+    ]);
+    render(<TrackRecordPage />);
+    expect(screen.getByTestId('empty-state')).toBeInTheDocument();
+    expect(screen.queryByTestId('track-record-content')).not.toBeInTheDocument();
   });
 
   test('no statistical jargon appears anywhere on the page', () => {

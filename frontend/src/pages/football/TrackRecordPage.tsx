@@ -30,7 +30,7 @@ const goalsWord = (n: number) => `${n} goal${n === 1 ? '' : 's'}`;
 // ── One match receipt card ────────────────────────────────────────────
 
 const MatchCard: React.FC<{ m: MatchReceipt }> = ({ m }) => {
-  const roundLabel = m.is_friendly ? null : roundShortLabel(m.round);
+  const roundLabel = roundShortLabel(m.round);
 
   return (
     <Card
@@ -42,18 +42,9 @@ const MatchCard: React.FC<{ m: MatchReceipt }> = ({ m }) => {
         border: '1px solid rgba(255,255,255,0.06)',
       }}
     >
-      {/* Badge row */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, minHeight: 22 }}>
-        {m.is_friendly && (
-          <Chip
-            label="Warm-up"
-            size="small"
-            data-testid="warmup-chip"
-            sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700,
-                  color: colors.darkText, backgroundColor: colors.labelText }}
-          />
-        )}
-        {roundLabel && (
+      {/* Round badge (absent when round is unknown — graceful) */}
+      {roundLabel && (
+        <Box sx={{ mb: 0.5 }}>
           <Chip
             label={roundLabel}
             size="small"
@@ -61,8 +52,8 @@ const MatchCard: React.FC<{ m: MatchReceipt }> = ({ m }) => {
             sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.5px',
                   color: colors.darkText, backgroundColor: colors.labelText }}
           />
-        )}
-      </Box>
+        </Box>
+      )}
 
       {/* Teams + final score */}
       <Typography
@@ -112,16 +103,24 @@ const MatchCard: React.FC<{ m: MatchReceipt }> = ({ m }) => {
 const TrackRecordContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
   const { matches, loading, error } = useAccuracyMatches();
 
+  // Public receipts are WC2026 only — pre-tournament warm-ups were internal
+  // pipeline tests, never public calls. Filter BEFORE the list and the
+  // headline so the number reflects exactly what's shown.
+  const wcMatches = useMemo(
+    () => matches.filter((m) => !m.is_friendly),
+    [matches],
+  );
+
   const headline = useMemo(() => {
-    const winnerEval = matches.filter((m) => m.winner_correct !== null);
+    const winnerEval = wcMatches.filter((m) => m.winner_correct !== null);
     const winnerHits = winnerEval.filter((m) => m.winner_correct === true).length;
-    const goalsEval = matches.filter((m) => m.goals_correct !== null);
+    const goalsEval = wcMatches.filter((m) => m.goals_correct !== null);
     const goalsHits = goalsEval.filter((m) => m.goals_correct === true).length;
     const pct = winnerEval.length
       ? Math.round((winnerHits / winnerEval.length) * 100)
       : 0;
     return { winnerHits, winnerTotal: winnerEval.length, pct, goalsHits, goalsTotal: goalsEval.length };
-  }, [matches]);
+  }, [wcMatches]);
 
   if (loading) {
     return (
@@ -153,7 +152,7 @@ const TrackRecordContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
     );
   }
 
-  if (matches.length === 0) {
+  if (wcMatches.length === 0) {
     return (
       <Box data-testid="empty-state" sx={{ textAlign: 'center', py: 6 }}>
         <Typography variant="h6" sx={{ color: colors.labelText, mb: 1 }}>
@@ -183,7 +182,7 @@ const TrackRecordContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
       </Box>
 
       {/* Match list, newest first (payload order) */}
-      {matches.map((m) => (
+      {wcMatches.map((m) => (
         <MatchCard key={m.fixture_id} m={m} />
       ))}
     </Box>
