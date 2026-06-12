@@ -44,6 +44,16 @@ describe('ContextSection', () => {
     expect(chips).toHaveLength(2); // get_team_form + get_head_to_head
   });
 
+  test('Injuries chip absent when no claim cites get_injuries (AGENT-1)', () => {
+    // Chips are data-driven from the claims array. With no injuries
+    // source for WC 2026 the backend never emits get_injuries claims,
+    // so the "Injuries" chip must not render.
+    render(<ContextSection reasoning={validReasoning} />);
+
+    const chipContainer = screen.getByTestId('citation-chips');
+    expect(chipContainer).not.toHaveTextContent('Injuries');
+  });
+
   test('chips show user-facing labels, not raw source strings', () => {
     render(<ContextSection reasoning={validReasoning} />);
 

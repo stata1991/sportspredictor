@@ -21,10 +21,11 @@ from dataclasses import dataclass, field
 from backend.football.agent.client import Claim
 
 # Known tool names — claims must cite one of these.
+# get_injuries is deliberately absent: API-Football has no injuries
+# coverage for WC 2026, so an injuries citation can only be fabricated.
 VALID_TOOL_SOURCES: frozenset[str] = frozenset({
     "get_team_form",
     "get_head_to_head",
-    "get_injuries",
     "get_market_consensus",
     "prediction_context",
 })
@@ -73,6 +74,26 @@ _LEAK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 ]
 
 
+# ── Injury/suspension claim patterns ─────────────────────────────────
+
+# There is NO injuries data source for WC 2026, so any injury or
+# suspension statement — including reassurances like "no injury
+# concerns" or "fully fit" — is an unsourced claim.  The narration
+# must stay silent on the topic.
+_RE_INJURY_CLAIM = re.compile(
+    r"\b(?:"
+    r"injur(?:y|ies|ed)"          # injury, injuries, injured
+    r"|suspen(?:sion|sions|ded)"  # suspension(s), suspended
+    r"|fully\s+fit"
+    r"|full\s+strength"
+    r"|fitness\s+(?:doubt|concern|worr)\w*"
+    r"|sidelined"
+    r"|ruled\s+out"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 # ── Result types ─────────────────────────────────────────────────────
 
 
@@ -80,7 +101,7 @@ _LEAK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 class ValidationResult:
     """Outcome of claim + probability-leak validation."""
 
-    status: str  # "valid", "probability_leaked", "invalid_source"
+    status: str  # "valid", "probability_leaked", "injury_claim", "invalid_source"
     violations: list[str] = field(default_factory=list)
 
     @property
@@ -125,6 +146,35 @@ def detect_probability_leaks(paragraphs: list[str]) -> list[str]:
     return violations
 
 
+def detect_injury_claims(
+    paragraphs: list[str],
+    claims: list[Claim],
+) -> list[str]:
+    """Scan narration and claim texts for injury/suspension language.
+
+    There is no injuries source for WC 2026, so ANY injury or
+    suspension statement (including "no injury concerns") is an
+    unsourced claim.  Returns a list of violation strings.
+    """
+    violations: list[str] = []
+
+    for i, paragraph in enumerate(paragraphs):
+        for match in _RE_INJURY_CLAIM.findall(paragraph):
+            violations.append(
+                f"paragraphs[{i}]: injury/suspension claim with no "
+                f"data source: '{match}'"
+            )
+
+    for i, claim in enumerate(claims):
+        for match in _RE_INJURY_CLAIM.findall(claim.text):
+            violations.append(
+                f"claims[{i}]: injury/suspension claim with no "
+                f"data source: '{match}'"
+            )
+
+    return violations
+
+
 def validate_reasoning(
     paragraphs: list[str],
     claims: list[Claim],
@@ -134,6 +184,7 @@ def validate_reasoning(
     Checks in order:
     1. Claim source validity
     2. Probability leak detection
+    3. Injury/suspension claim detection (no source exists for WC 2026)
 
     Returns a :class:`ValidationResult` with status and any violations.
     """
@@ -147,13 +198,23 @@ def validate_reasoning(
     leak_violations = detect_probability_leaks(paragraphs)
     all_violations.extend(leak_violations)
 
+    # 3. Injury/suspension claims.
+    injury_violations = detect_injury_claims(paragraphs, claims)
+    all_violations.extend(injury_violations)
+
     if not all_violations:
         return ValidationResult(status="valid")
 
-    # Classify: probability leak takes priority as a status label.
+    # Classify: probability leak takes priority as a status label,
+    # then injury claims, then bad sources.
     if leak_violations:
         return ValidationResult(
             status="probability_leaked", violations=all_violations
+        )
+
+    if injury_violations:
+        return ValidationResult(
+            status="injury_claim", violations=all_violations
         )
 
     return ValidationResult(

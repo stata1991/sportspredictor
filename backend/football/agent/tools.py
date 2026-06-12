@@ -78,21 +78,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "required": ["home_team_id", "away_team_id"],
         },
     },
-    {
-        "name": "get_injuries",
-        "description": (
-            "Retrieve current injuries and suspensions for the tournament. "
-            "Returns player name, injury type, and reason. Do NOT use "
-            "player names in your written output — refer to them by "
-            "position or role only (e.g. 'starting goalkeeper', "
-            "'first-choice striker')."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
+    # NOTE: no get_injuries tool — API-Football has no injuries coverage
+    # for WC 2026 (league 1, season 2026), so the agent must not be
+    # offered an injuries source at all.
     {
         "name": "get_market_consensus",
         "description": (
@@ -209,34 +197,6 @@ async def _exec_get_head_to_head(
     return "\n".join(lines)
 
 
-async def _exec_get_injuries(
-    client: APIFootballClient,
-    tool_input: dict[str, Any],
-) -> str:
-    """Execute get_injuries tool."""
-    injuries = await client.get_injuries()
-
-    if not injuries:
-        return "No injuries or suspensions currently reported for this tournament."
-
-    # Group by team.
-    by_team: dict[str, list[str]] = {}
-    for inj in injuries:
-        team = inj.team.name
-        player_type = inj.player.type or "Unknown"
-        reason = inj.player.reason or "unspecified"
-        entry = f"{inj.player.name} — {player_type}: {reason}"
-        by_team.setdefault(team, []).append(entry)
-
-    lines = [f"Injuries/suspensions ({len(injuries)} total):"]
-    for team, entries in sorted(by_team.items()):
-        lines.append(f"  {team}:")
-        for e in entries:
-            lines.append(f"    - {e}")
-
-    return "\n".join(lines)
-
-
 async def _exec_get_market_consensus(
     client: APIFootballClient,
     tool_input: dict[str, Any],
@@ -303,7 +263,6 @@ _TOOL_DISPATCH: dict[
 ] = {
     "get_team_form": _exec_get_team_form,
     "get_head_to_head": _exec_get_head_to_head,
-    "get_injuries": _exec_get_injuries,
     "get_market_consensus": _exec_get_market_consensus,
 }
 

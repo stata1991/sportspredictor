@@ -16,6 +16,7 @@ import pytest
 from backend.football.agent.claim_validator import (
     VALID_TOOL_SOURCES,
     ValidationResult,
+    detect_injury_claims,
     detect_probability_leaks,
     validate_claim_sources,
     validate_reasoning,
@@ -172,6 +173,72 @@ class TestValidateClaimSources:
     def test_empty_claims(self):
         assert validate_claim_sources([]) == []
 
+    def test_get_injuries_is_not_a_valid_source(self):
+        """No injuries coverage for WC 2026 — citing it is a violation."""
+        assert "get_injuries" not in VALID_TOOL_SOURCES
+        claims = [
+            Claim(text="A key midfielder is out", source="get_injuries"),
+        ]
+        violations = validate_claim_sources(claims)
+        assert len(violations) == 1
+        assert "get_injuries" in violations[0]
+
+
+class TestDetectInjuryClaims:
+    """No injuries source exists for WC 2026 — ANY injury/suspension
+    statement (including reassurance) is an unsourced claim."""
+
+    def test_clean_text(self):
+        paragraphs = [
+            "Mexico are the clear favourite in this match.",
+            "Recent form gives them the edge.",
+            "It could go either way on the day.",
+        ]
+        assert detect_injury_claims(paragraphs, []) == []
+
+    def test_negative_injury_claim_flagged(self):
+        """'No injury concerns' is still a claim — we have no source for it."""
+        paragraphs = ["No injury concerns for either side."]
+        violations = detect_injury_claims(paragraphs, [])
+        assert len(violations) == 1
+        assert "injury/suspension claim" in violations[0]
+
+    def test_positive_injury_claim_flagged(self):
+        paragraphs = ["Their first-choice striker is injured."]
+        assert len(detect_injury_claims(paragraphs, [])) == 1
+
+    def test_suspension_claim_flagged(self):
+        paragraphs = ["A key defender is suspended for this one."]
+        assert len(detect_injury_claims(paragraphs, [])) == 1
+
+    def test_fully_fit_flagged(self):
+        paragraphs = ["Brazil arrive with a fully fit squad."]
+        assert len(detect_injury_claims(paragraphs, [])) == 1
+
+    def test_full_strength_flagged(self):
+        paragraphs = ["Germany are at full strength."]
+        assert len(detect_injury_claims(paragraphs, [])) == 1
+
+    def test_ruled_out_flagged(self):
+        paragraphs = ["Their starting goalkeeper has been ruled out."]
+        assert len(detect_injury_claims(paragraphs, [])) == 1
+
+    def test_claim_text_scanned(self):
+        claims = [
+            Claim(text="No injuries reported for Brazil", source="prediction_context"),
+        ]
+        violations = detect_injury_claims([], claims)
+        assert len(violations) == 1
+        assert "claims[0]" in violations[0]
+
+    def test_benign_words_not_flagged(self):
+        """'fitness' alone, 'strength in depth' etc. must not trip the guard."""
+        paragraphs = [
+            "Their fitness levels held up late in qualifying.",
+            "Mexico's strength is their midfield press.",
+        ]
+        assert detect_injury_claims(paragraphs, []) == []
+
 
 class TestDetectProbabilityLeaks:
     def test_clean_text(self):
@@ -287,6 +354,21 @@ class TestValidateReasoning:
         paragraphs = ["65% chance.", "Clean.", "Clean."]
         result = validate_reasoning(paragraphs, claims)
         assert result.status == "probability_leaked"
+
+    def test_injury_claim_status(self):
+        claims = [Claim(text="Fact", source="get_team_form")]
+        paragraphs = ["No injury worries for the hosts.", "Clean.", "Clean."]
+        result = validate_reasoning(paragraphs, claims)
+        assert result.status == "injury_claim"
+        assert not result.is_valid
+
+    def test_leak_takes_priority_over_injury_claim(self):
+        claims = [Claim(text="Fact", source="get_team_form")]
+        paragraphs = ["65% chance and no injury concerns.", "Clean.", "Clean."]
+        result = validate_reasoning(paragraphs, claims)
+        assert result.status == "probability_leaked"
+        # Both violation kinds are still reported.
+        assert any("injury/suspension" in v for v in result.violations)
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -36,7 +36,6 @@ def _make_context() -> MatchContext:
         home_form="Qatar: W2 D1 L2 in last 5 matches.",
         away_form="Switzerland: W3 D1 L1 in last 5 matches.",
         head_to_head="No head-to-head fixtures found.",
-        injuries="No injuries reported.",
         market_consensus="No odds available for fixture 1489373.",
         fixture_id=1489373,
         home_team="Qatar",
@@ -63,8 +62,8 @@ VALID_JSON_RESPONSE = json.dumps(
             "and decent recent form giving them the edge. Switzerland will be "
             "competitive but Qatar should create the better chances.",
             "These two have never met in a competitive fixture. Qatar have won "
-            "2 of their last 5, while Switzerland have won 3 of their last 5. "
-            "No injuries reported for either side heading into this one.",
+            "2 of their last 5, while Switzerland have won 3 of their last 5, "
+            "so the visitors arrive with the stronger recent results.",
             "The lack of head-to-head history makes this harder to call. "
             "Switzerland's stronger recent form could be the difference if "
             "Qatar cannot impose themselves early. Treat this with caution.",
@@ -304,8 +303,10 @@ class TestGenerateReasoningSingleShot:
             assert "== AWAY TEAM FORM ==" in user_content
             assert "Switzerland: W3 D1 L1" in user_content
             assert "== HEAD-TO-HEAD ==" in user_content
-            assert "== INJURIES ==" in user_content
             assert "== MARKET CONSENSUS ==" in user_content
+
+            # No injuries section — no injuries coverage for WC 2026
+            assert "== INJURIES ==" not in user_content
 
             # System prompt uses the single-shot version (check cache_control)
             system = call_kwargs.kwargs["system"]

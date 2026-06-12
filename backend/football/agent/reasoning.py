@@ -67,7 +67,7 @@ class ReasoningOutput(BaseModel):
     tokens_used: int
     model_version: str
     generated_at: datetime
-    validation_status: str  # "valid", "probability_leaked", "invalid_source"
+    validation_status: str  # "valid", "probability_leaked", "injury_claim", "invalid_source"
     cost_usd: float
 
 

@@ -77,7 +77,7 @@ export interface Reasoning {
   upset_index: number;
   upset_signals: UpsetSignal[];
   upset_paths: string[];
-  validation_status: string; // "valid" | "probability_leaked" | "invalid_source"
+  validation_status: string; // "valid" | "probability_leaked" | "injury_claim" | "invalid_source"
 }
 
 // ── Upset (from _upset_to_dict in routes.py) ───────────────────────

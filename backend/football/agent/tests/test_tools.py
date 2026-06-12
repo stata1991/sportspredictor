@@ -15,7 +15,6 @@ import pytest
 from backend.football.agent.tools import (
     TOOL_DEFINITIONS,
     _exec_get_head_to_head,
-    _exec_get_injuries,
     _exec_get_market_consensus,
     _exec_get_team_form,
     execute_tool,
@@ -27,10 +26,6 @@ from backend.football.schemas import (
     AFFixtureInfo,
     AFFixtureStatus,
     AFGoals,
-    AFInjury,
-    AFInjuryFixture,
-    AFInjuryLeague,
-    AFInjuryPlayer,
     AFLeagueRef,
     AFOddValue,
     AFOdds,
@@ -74,26 +69,6 @@ def _make_fixture(
     )
 
 
-def _make_injury(
-    player_name: str = "Player A",
-    team_name: str = "Brazil",
-    injury_type: str = "Missing Fixture",
-    reason: str = "Knee Injury",
-) -> AFInjury:
-    """Build a synthetic AFInjury."""
-    return AFInjury(
-        player=AFInjuryPlayer(
-            id=100,
-            name=player_name,
-            type=injury_type,
-            reason=reason,
-        ),
-        team=AFTeam(id=6, name=team_name),
-        fixture=AFInjuryFixture(id=1001),
-        league=AFInjuryLeague(id=1, name="World Cup"),
-    )
-
-
 def _make_odds(
     home_odd: str = "1.80",
     draw_odd: str = "3.50",
@@ -130,8 +105,8 @@ def _mock_client() -> AsyncMock:
 
 
 class TestToolDefinitions:
-    def test_four_tools_defined(self):
-        assert len(TOOL_DEFINITIONS) == 4
+    def test_three_tools_defined(self):
+        assert len(TOOL_DEFINITIONS) == 3
 
     def test_all_have_required_keys(self):
         for tool in TOOL_DEFINITIONS:
@@ -144,9 +119,13 @@ class TestToolDefinitions:
         assert names == {
             "get_team_form",
             "get_head_to_head",
-            "get_injuries",
             "get_market_consensus",
         }
+
+    def test_no_injuries_tool(self):
+        """No injuries coverage for WC 2026 — the tool must not exist."""
+        names = {t["name"] for t in TOOL_DEFINITIONS}
+        assert "get_injuries" not in names
 
     def test_input_schemas_are_valid_objects(self):
         for tool in TOOL_DEFINITIONS:
@@ -246,35 +225,6 @@ class TestGetHeadToHead:
         )
 
         assert "No head-to-head" in result
-
-
-# ── get_injuries ─────────────────────────────────────────────────────
-
-
-class TestGetInjuries:
-    @pytest.mark.asyncio
-    async def test_returns_grouped_injuries(self):
-        client = _mock_client()
-        client.get_injuries.return_value = [
-            _make_injury("Player A", "Brazil", "Missing Fixture", "Knee"),
-            _make_injury("Player B", "Brazil", "Doubtful", "Hamstring"),
-            _make_injury("Player C", "Germany", "Missing Fixture", "Suspended"),
-        ]
-
-        result = await _exec_get_injuries(client, {})
-
-        assert "Brazil" in result
-        assert "Germany" in result
-        assert "3 total" in result
-
-    @pytest.mark.asyncio
-    async def test_no_injuries(self):
-        client = _mock_client()
-        client.get_injuries.return_value = []
-
-        result = await _exec_get_injuries(client, {})
-
-        assert "No injuries" in result
 
 
 # ── get_market_consensus ─────────────────────────────────────────────
@@ -383,11 +333,14 @@ class TestExecuteTool:
     @pytest.mark.asyncio
     async def test_dispatches_known_tool(self):
         client = _mock_client()
-        client.get_injuries.return_value = []
+        client.get_head_to_head.return_value = []
 
-        result = await execute_tool(client, "get_injuries", {})
+        result = await execute_tool(
+            client, "get_head_to_head",
+            {"home_team_id": 6, "away_team_id": 25},
+        )
 
-        assert "No injuries" in result
+        assert "No head-to-head" in result
 
     @pytest.mark.asyncio
     async def test_unknown_tool_raises_keyerror(self):
@@ -395,6 +348,14 @@ class TestExecuteTool:
 
         with pytest.raises(KeyError):
             await execute_tool(client, "nonexistent_tool", {})
+
+    @pytest.mark.asyncio
+    async def test_get_injuries_no_longer_dispatchable(self):
+        """get_injuries was removed — dispatching it must fail."""
+        client = _mock_client()
+
+        with pytest.raises(KeyError):
+            await execute_tool(client, "get_injuries", {})
 
 
 # ── Client parse_result ──────────────────────────────────────────────

@@ -77,7 +77,6 @@ def _mock_client(
     home_form: str = "Recent form for Qatar...",
     away_form: str = "Recent form for Switzerland...",
     h2h: str = "Head-to-head record...",
-    injuries: str = "No injuries reported.",
     odds: str = "No odds available for fixture 1489373.",
 ) -> AsyncMock:
     """Build a mock APIFootballClient that the _exec_* functions can call.
@@ -99,9 +98,6 @@ def _mock_client(
     # get_head_to_head calls client.get_head_to_head(home_id, away_id, last=N)
     client.get_head_to_head = AsyncMock(return_value=[])
 
-    # get_injuries calls client.get_injuries()
-    client.get_injuries = AsyncMock(return_value=[])
-
     # get_odds calls client.get_odds(fixture_id)
     client.get_odds = AsyncMock(return_value=[])
 
@@ -116,7 +112,7 @@ class TestPreFetchMatchContext:
 
     @pytest.mark.asyncio
     async def test_happy_path_all_sources_succeed(self):
-        """All 5 tool calls succeed; MatchContext fields populated."""
+        """All 4 tool calls succeed; MatchContext fields populated."""
         client = _mock_client()
         bundle = _make_bundle()
 
@@ -136,8 +132,10 @@ class TestPreFetchMatchContext:
         assert "Qatar" in ctx.home_form
         assert "Switzerland" in ctx.away_form
         assert "head-to-head" in ctx.head_to_head.lower() or "No" in ctx.head_to_head
-        assert ctx.injuries  # non-empty string
         assert ctx.market_consensus  # non-empty string
+
+        # No injuries field — no injuries coverage for WC 2026
+        assert not hasattr(ctx, "injuries")
 
         # Prediction context fields passed through
         assert ctx.fixture_id == 1489373
@@ -156,17 +154,17 @@ class TestPreFetchMatchContext:
         assert abs(ctx.over_2_5 - 0.42) < 1e-6
         assert abs(ctx.under_2_5 - 0.58) < 1e-6
 
-        # Verify all 5 API client methods were called
+        # Verify all 4 API client methods were called; injuries NEVER
         assert client.get_team_last_fixtures.call_count == 2
         client.get_head_to_head.assert_awaited_once()
-        client.get_injuries.assert_awaited_once()
         client.get_odds.assert_awaited_once()
+        client.get_injuries.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_single_source_failure_uses_fallback(self):
         """When one source fails, its field gets a fallback string."""
         client = _mock_client()
-        client.get_injuries = AsyncMock(
+        client.get_head_to_head = AsyncMock(
             side_effect=RuntimeError("API-Football 503")
         )
         bundle = _make_bundle()
@@ -181,8 +179,8 @@ class TestPreFetchMatchContext:
             bundle=bundle,
         )
 
-        # Injuries field has fallback
-        assert ctx.injuries == "Injury data unavailable."
+        # Head-to-head field has fallback
+        assert ctx.head_to_head == "No head-to-head data available."
 
         # Other fields are still populated from successful calls
         assert "Qatar" in ctx.home_form
@@ -191,11 +189,8 @@ class TestPreFetchMatchContext:
 
     @pytest.mark.asyncio
     async def test_multiple_failures_use_fallbacks(self):
-        """When 3 of 5 sources fail, all 3 get fallbacks, 2 succeed."""
+        """When 2 of 4 sources fail, both get fallbacks, 2 succeed."""
         client = _mock_client()
-        client.get_injuries = AsyncMock(
-            side_effect=RuntimeError("injuries down")
-        )
         client.get_odds = AsyncMock(
             side_effect=TimeoutError("odds timeout")
         )
@@ -215,7 +210,6 @@ class TestPreFetchMatchContext:
         )
 
         # Failed fields have fallbacks
-        assert ctx.injuries == "Injury data unavailable."
         assert ctx.market_consensus == "No odds available for fixture 1489373."
         assert ctx.head_to_head == "No head-to-head data available."
 
@@ -225,16 +219,13 @@ class TestPreFetchMatchContext:
 
     @pytest.mark.asyncio
     async def test_total_failure_all_fallbacks(self, caplog):
-        """When all 5 sources fail, all fields get fallbacks and warnings are logged."""
+        """When all 4 sources fail, all fields get fallbacks and warnings are logged."""
         client = AsyncMock()
         client.get_team_last_fixtures = AsyncMock(
             side_effect=RuntimeError("form down")
         )
         client.get_head_to_head = AsyncMock(
             side_effect=RuntimeError("h2h down")
-        )
-        client.get_injuries = AsyncMock(
-            side_effect=RuntimeError("injuries down")
         )
         client.get_odds = AsyncMock(
             side_effect=RuntimeError("odds down")
@@ -256,18 +247,17 @@ class TestPreFetchMatchContext:
         assert ctx.home_form == "No recent form data available for Qatar."
         assert ctx.away_form == "No recent form data available for Switzerland."
         assert ctx.head_to_head == "No head-to-head data available."
-        assert ctx.injuries == "Injury data unavailable."
         assert ctx.market_consensus == "No odds available for fixture 1489373."
 
         # Prediction context still intact
         assert ctx.fixture_id == 1489373
         assert ctx.stage == "pre_lineup"
 
-        # 5 warning logs emitted
+        # 4 warning logs emitted
         warning_records = [
             r for r in caplog.records if r.levelno == logging.WARNING
         ]
-        assert len(warning_records) == 5
+        assert len(warning_records) == 4
 
     @pytest.mark.asyncio
     async def test_parallel_execution_timing(self):
@@ -289,17 +279,12 @@ class TestPreFetchMatchContext:
             await asyncio.sleep(max_sleep)
             return []
 
-        async def _slow_injuries(league=1, season=2026):
-            await asyncio.sleep(0.08)
-            return []
-
         async def _slow_odds(fixture_id):
             await asyncio.sleep(0.05)
             return []
 
         client.get_team_last_fixtures = AsyncMock(side_effect=_slow_form)
         client.get_head_to_head = AsyncMock(side_effect=_slow_h2h)
-        client.get_injuries = AsyncMock(side_effect=_slow_injuries)
         client.get_odds = AsyncMock(side_effect=_slow_odds)
 
         bundle = _make_bundle()
@@ -316,7 +301,7 @@ class TestPreFetchMatchContext:
         )
         elapsed = time.perf_counter() - t0
 
-        # Sum of all sleeps would be 0.10 + 0.10 + 0.15 + 0.08 + 0.05 = 0.48s
+        # Sum of all sleeps would be 0.10 + 0.10 + 0.15 + 0.05 = 0.40s
         # Parallel execution should complete in ~max_sleep (0.15s)
         # Allow 1.3x tolerance for scheduling overhead
         tolerance = 1.3

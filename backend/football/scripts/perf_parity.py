@@ -78,11 +78,11 @@ FORBIDDEN_VOCAB_RE = re.compile(
     r"|claims could not be verified"
 )
 
-# Allowed claim/signal source values (verbatim from perf-2.3 Section 7).
+# Allowed claim/signal source values (perf-2.3 Section 7; get_injuries
+# removed with AGENT-1 — no injuries coverage for WC 2026).
 ALLOWED_SOURCES = frozenset({
     "get_team_form",
     "get_head_to_head",
-    "get_injuries",
     "get_market_consensus",
     "prediction_context",
 })

@@ -38,10 +38,9 @@ containing:
 
 ## Tools available
 
-You have four tools. Use them to gather evidence BEFORE writing your analysis:
+You have three tools. Use them to gather evidence BEFORE writing your analysis:
 - **get_team_form**: Recent results for a team
 - **get_head_to_head**: Head-to-head history between the two teams
-- **get_injuries**: Current tournament injuries/suspensions
 - **get_market_consensus**: Betting odds
 
 Call the tools you need, then write your analysis based on what they return.
@@ -173,6 +172,13 @@ can "settle for", "hold on for", or "be happy with" a draw, and never build an \
 upset path around grinding out a stalemate. The underdog's upset path is winning \
 the tie — in regulation, in extra time, or on penalties.
 
+8. **No injury or suspension claims**: You have NO injury or suspension data \
+for this tournament. Never make any claim about injuries, suspensions, fitness, \
+or player availability — positive or negative. "No injury concerns", "a fully \
+fit squad", "no suspension worries", "missing key players", "at full strength" \
+are all claims, and you have no source for any of them. Do not raise the topic \
+at all — silence, not reassurance.
+
 ## Paragraph structure
 
 **Paragraph 1 — Who wins and why** (~150 words): Lead with your take on the \
@@ -181,7 +187,7 @@ attacking quality, defensive shape, form — not in statistical terms. Do not \
 cite raw numbers from the prediction engine.
 
 **Paragraph 2 — The backstory** (~150 words): Tournament context, head-to-head \
-record, recent form, and any relevant injury/suspension news. Every factual \
+record, and recent form. Every factual \
 claim here must come from a tool call and appear in the claims array.
 
 **Paragraph 3 — What could go wrong** (~150 words): Why the prediction could be \
@@ -194,7 +200,6 @@ When citing a fact in `claims` or `upset_signals`, the `source` field must be \
 one of:
 - `get_team_form` — recent results from the tool
 - `get_head_to_head` — head-to-head history from the tool
-- `get_injuries` — injuries from the tool
 - `get_market_consensus` — betting odds from the tool
 - `prediction_context` — facts about the prediction context (e.g. limited data \
 available, team not well-covered in recent fixtures)
@@ -274,11 +279,10 @@ structured JSON analysis containing:
 ## Data provided
 
 All match data has been gathered for you and is included in the user \
-message below. You have data from five sources:
+message below. You have data from four sources:
 - **team_form (home)**: Recent results for the home team
 - **team_form (away)**: Recent results for the away team
 - **head_to_head**: Head-to-head history between the two teams
-- **injuries**: Current tournament injuries/suspensions
 - **market_consensus**: Betting odds
 
 Base your analysis on this data. Do not request additional information.
@@ -410,6 +414,13 @@ can "settle for", "hold on for", or "be happy with" a draw, and never build an \
 upset path around grinding out a stalemate. The underdog's upset path is winning \
 the tie — in regulation, in extra time, or on penalties.
 
+8. **No injury or suspension claims**: You have NO injury or suspension data \
+for this tournament. Never make any claim about injuries, suspensions, fitness, \
+or player availability — positive or negative. "No injury concerns", "a fully \
+fit squad", "no suspension worries", "missing key players", "at full strength" \
+are all claims, and you have no source for any of them. Do not raise the topic \
+at all — silence, not reassurance.
+
 ## Paragraph structure
 
 **Paragraph 1 — Who wins and why** (~150 words): Lead with your take on the \
@@ -418,7 +429,7 @@ attacking quality, defensive shape, form — not in statistical terms. Do not \
 cite raw numbers from the prediction engine.
 
 **Paragraph 2 — The backstory** (~150 words): Tournament context, head-to-head \
-record, recent form, and any relevant injury/suspension news. Every factual \
+record, and recent form. Every factual \
 claim here must come from the data provided and appear in the claims array.
 
 **Paragraph 3 — What could go wrong** (~150 words): Why the prediction could be \
@@ -431,7 +442,6 @@ When citing a fact in `claims` or `upset_signals`, the `source` field must be \
 one of:
 - `get_team_form` — recent results from the form data
 - `get_head_to_head` — head-to-head history
-- `get_injuries` — injuries data
 - `get_market_consensus` — betting odds
 - `prediction_context` — facts about the prediction context (e.g. limited data \
 available, team not well-covered in recent fixtures)
@@ -488,9 +498,6 @@ Away team ID: {away_team_id}
 
 == HEAD-TO-HEAD ==
 {head_to_head}
-
-== INJURIES ==
-{injuries}
 
 == MARKET CONSENSUS ==
 {market_consensus}

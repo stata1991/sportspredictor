@@ -57,10 +57,11 @@ STALE_TTL_MULTIPLIER = 5
 
 # ── Coverage expectations ────────────────────────────────────────────
 # Flags expected to flip true 2-4 weeks before the tournament (June 11).
+# "injuries" removed 2026-06-12: API-Football confirmed injuries=false
+# for WC 2026 (league 1, season 2026) — not coming, so not expected.
 EXPECTED_COVERAGE: Final[frozenset[str]] = frozenset({
     "fixtures_events",
     "fixtures_lineups",
     "fixtures_statistics_fixtures",
-    "injuries",
     "odds",
 })

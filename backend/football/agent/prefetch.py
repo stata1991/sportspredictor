@@ -18,7 +18,6 @@ from dataclasses import dataclass
 
 from backend.football.agent.tools import (
     _exec_get_head_to_head,
-    _exec_get_injuries,
     _exec_get_market_consensus,
     _exec_get_team_form,
 )
@@ -32,17 +31,20 @@ logger = logging.getLogger(__name__)
 class MatchContext:
     """All external data needed for reasoning, pre-fetched in parallel.
 
-    Each text field (home_form, away_form, head_to_head, injuries,
+    Each text field (home_form, away_form, head_to_head,
     market_consensus) contains the same plain-text output the tool
     implementations produce, so the LLM prompt is format-identical
     to the agent-loop era.
+
+    Injuries are deliberately absent: API-Football has no injuries
+    coverage for WC 2026 (league 1, season 2026), so the agent gets
+    no injury data and is prompt-barred from injury/suspension claims.
     """
 
     # Pre-fetched data (plain-text tool output)
     home_form: str
     away_form: str
     head_to_head: str
-    injuries: str
     market_consensus: str
 
     # Prediction context (passed through from routes.py)
@@ -82,7 +84,7 @@ async def pre_fetch_match_context(
 ) -> MatchContext:
     """Fetch all external data for reasoning in parallel.
 
-    Calls all 4 API-Football data sources concurrently via
+    Calls the API-Football data sources concurrently via
     asyncio.gather().  Each call reuses the existing tool
     implementation functions for output format consistency.
 
@@ -106,7 +108,6 @@ async def pre_fetch_match_context(
             "away_team_id": away_team_id,
             "last": 10,
         }),
-        _exec_get_injuries(client, {}),
         _exec_get_market_consensus(client, {
             "fixture_id": fixture_id,
         }),
@@ -126,12 +127,8 @@ async def pre_fetch_match_context(
             results[2],
             "No head-to-head data available.",
         ),
-        injuries=_resolve(
-            results[3],
-            "Injury data unavailable.",
-        ),
         market_consensus=_resolve(
-            results[4],
+            results[3],
             f"No odds available for fixture {fixture_id}.",
         ),
         fixture_id=fixture_id,

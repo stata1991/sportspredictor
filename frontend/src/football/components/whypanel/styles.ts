@@ -18,7 +18,10 @@ export const sectionLabelSx = {
   mb: 1,
 };
 
-/** Map internal tool source names to user-facing labels */
+/** Map internal tool source names to user-facing labels.
+ * get_injuries stays mapped only for legacy cached bundles generated
+ * before AGENT-1 removed the injuries source (no WC2026 coverage) —
+ * new bundles never emit it. */
 const SOURCE_LABELS: Record<string, string> = {
   get_team_form: 'Recent form',
   get_head_to_head: 'Head-to-head',

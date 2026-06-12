@@ -129,7 +129,7 @@ def test_af_coverage_handles_missing_fixtures_subdict() -> None:
 
 
 def test_coverage_status_warns_on_expected_gaps() -> None:
-    """Current WC 2026 state (only standings+predictions true) → 5 warnings."""
+    """Current WC 2026 state (only standings+predictions true) → 1 warning."""
     cov = AFCoverage.model_validate({
         "fixtures": {
             "events": False,
@@ -154,10 +154,13 @@ def test_coverage_status_warns_on_expected_gaps() -> None:
         "fixtures_events",
         "fixtures_lineups",
         "fixtures_statistics_fixtures",
-        "injuries",
         "odds",
     ]:
         assert expected_key in warning
+
+    # injuries=false is confirmed permanent for WC 2026 — no longer an
+    # expected-coverage gap, so it must not be warned about.
+    assert "injuries" not in warning
 
 
 def test_coverage_status_no_warnings_when_complete() -> None:
