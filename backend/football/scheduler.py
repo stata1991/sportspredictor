@@ -151,3 +151,117 @@ async def start_scheduler() -> asyncio.Task | None:
     if not settings.prewarm_scheduler_enabled:
         return None
     return asyncio.create_task(_scheduler_loop())
+
+
+# ── Evaluation scheduler (Track Record rollups) ───────────────────────
+
+_EVAL_MONITOR_SLUG = "eval-scheduler"
+
+_EVAL_MONITOR_CONFIG = {
+    "schedule": {"type": "interval", "value": 30, "unit": "minute"},
+    "checkin_margin": 5,
+    "max_runtime": 10,  # minutes — ingest + compute is quick
+    "failure_issue_threshold": 2,
+    "recovery_threshold": 1,
+}
+
+
+async def run_evaluation() -> dict:
+    """Run the evaluation pipeline once: ingest outcomes, then recompute the
+    rollups (replace-in-place).  Returns ``{"ingested": N, "rollups_written": M}``.
+
+    Cheap when nothing new completed — ingest only fetches fixtures that have
+    a prediction but no outcome row, and compute replaces the small grid.
+    """
+    from backend.football.scripts.compute_accuracy import run_compute
+    from backend.football.scripts.ingest_outcomes import run_ingest
+
+    ingest_result = await run_ingest()
+    compute_result = await run_compute()
+    return {
+        "ingested": ingest_result["ingested"],
+        "rollups_written": compute_result["rollups_written"],
+    }
+
+
+async def _eval_scheduler_loop() -> None:
+    """Run evaluation ticks forever until cancelled.
+
+    Same hardened pattern as ``_scheduler_loop``: the whole per-tick body
+    (Sentry check-in → ingest+compute → check-in finish) is inside one broad
+    try/except so nothing a tick does can kill the loop.  Only CancelledError
+    exits.  Fires immediately on first iteration, then every ``interval``.
+    """
+    settings = get_settings()
+    interval = settings.eval_interval_seconds
+
+    _emit({"event": "eval_scheduler_started", "interval_seconds": interval})
+
+    try:
+        while True:
+            phase = "init"
+            try:
+                check_in_id = None
+                if _sentry_enabled():
+                    phase = "checkin_start"
+                    check_in_id = capture_checkin(
+                        monitor_slug=_EVAL_MONITOR_SLUG,
+                        status=MonitorStatus.IN_PROGRESS,
+                        monitor_config=_EVAL_MONITOR_CONFIG,
+                    )
+
+                phase = "eval_run"
+                counts = await run_evaluation()
+                _emit({
+                    "event": "eval_run",
+                    "ingested": counts["ingested"],
+                    "rollups_written": counts["rollups_written"],
+                })
+
+                if _sentry_enabled() and check_in_id is not None:
+                    phase = "checkin_finish"
+                    capture_checkin(
+                        monitor_slug=_EVAL_MONITOR_SLUG,
+                        check_in_id=check_in_id,
+                        status=MonitorStatus.OK,
+                        monitor_config=_EVAL_MONITOR_CONFIG,
+                    )
+
+            except asyncio.CancelledError:
+                raise
+
+            except Exception as exc:
+                _emit({
+                    "event": "eval_scheduler_tick_error",
+                    "error": repr(exc),
+                    "phase": phase,
+                })
+                if _sentry_enabled():
+                    try:
+                        sentry_sdk.capture_exception(exc)
+                    except Exception:
+                        pass
+                if _sentry_enabled() and check_in_id is not None:
+                    try:
+                        capture_checkin(
+                            monitor_slug=_EVAL_MONITOR_SLUG,
+                            check_in_id=check_in_id,
+                            status=MonitorStatus.ERROR,
+                            monitor_config=_EVAL_MONITOR_CONFIG,
+                        )
+                    except Exception:
+                        pass
+
+            await asyncio.sleep(interval)
+
+    except asyncio.CancelledError:
+        _emit({"event": "eval_scheduler_stopped"})
+        raise
+
+
+async def start_eval_scheduler() -> asyncio.Task | None:
+    """Create the evaluation scheduler task if EVAL_SCHEDULER_ENABLED."""
+    settings = get_settings()
+    if not settings.eval_scheduler_enabled:
+        return None
+    return asyncio.create_task(_eval_scheduler_loop())

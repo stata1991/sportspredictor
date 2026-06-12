@@ -28,6 +28,7 @@ from sqlalchemy import select
 from backend.cache import CacheClient
 from backend.football.data_provider import APIFootballClient
 from backend.football.persistence import save_outcome
+from backend.football.schemas import AFEvent
 from backend.shared.async_singleflight import AsyncSingleflight
 from backend.shared.db import get_db_session
 from backend.shared.models import Outcome, Prediction
@@ -44,11 +45,31 @@ _COMPLETED = frozenset({"FT", "AET", "PEN"})
 _SKIP_WARN = frozenset({"PST", "CANC", "ABD", "AWD", "WO"})
 
 
+def _first_scorer_team(events: list[AFEvent]) -> str | None:
+    """Return the name of the team that scored first, or None if no goals.
+
+    Uses the earliest 'Goal' event by elapsed time. Own goals are not
+    special-cased — the event's ``team`` is taken as-is (per EVAL-1's
+    "first Goal event → team"); an own-goal opener is a rare edge case noted
+    as a known limitation.
+    """
+    goals = [e for e in events if e.type == "Goal"]
+    if not goals:
+        return None
+    goals.sort(key=lambda e: ((e.time.elapsed or 0), (e.time.extra or 0)))
+    return goals[0].team.name
+
+
 # ── Core logic ───────────────────────────────────────────────────────
 
 
-async def _run() -> int:
-    """Ingest missing outcomes.  Returns exit code."""
+async def run_ingest() -> dict:
+    """Ingest missing outcomes.  Returns a counts dict.
+
+    ``{"missing": int, "ingested": int, "skipped": int, "errors": int}``
+    Idempotent: only fixtures with a prediction but no outcome row are
+    fetched, so a re-run with nothing newly completed does no writes.
+    """
     settings = get_settings()
     if not settings.api_football_key:
         logger.error("API_FOOTBALL_KEY not set in environment / .env")
@@ -81,7 +102,7 @@ async def _run() -> int:
             f"{len(predicted_ids)} fixtures with predictions "
             f"but no outcomes. Nothing to ingest."
         )
-        return 0
+        return {"missing": 0, "ingested": 0, "skipped": 0, "errors": 0}
 
     print(
         f"{len(missing_ids)} fixtures with predictions "
@@ -152,6 +173,20 @@ async def _run() -> int:
                 ht_home = fixture.score.halftime.home
                 ht_away = fixture.score.halftime.away
 
+                # ── First scorer (best-effort) ──────────────
+                # Events power first_to_score evaluation. A failure here must
+                # not block saving the outcome — fall back to None.
+                first_scorer_team = None
+                try:
+                    events = await client.get_events(fixture_id)
+                    first_scorer_team = _first_scorer_team(events)
+                except Exception:
+                    logger.warning(
+                        "Could not fetch events for fixture %d; "
+                        "first_scorer_team=None",
+                        fixture_id,
+                    )
+
                 # ── Upsert outcome ──────────────────────────
                 async with get_db_session() as session:
                     await save_outcome(
@@ -163,10 +198,7 @@ async def _run() -> int:
                         ft_away=ft_away,
                         ht_home=ht_home,
                         ht_away=ht_away,
-                        # TODO(week3): derive first_scorer_team from
-                        # match events via client.get_events(). Find
-                        # the first "Goal" event and extract team name.
-                        first_scorer_team=None,
+                        first_scorer_team=first_scorer_team,
                         kickoff_at=fixture.fixture.date,
                     )
                     await session.commit()
@@ -198,7 +230,12 @@ async def _run() -> int:
         f"{ingested} ingested, {skipped} skipped, {errors} errors"
     )
 
-    return 1 if errors > 0 else 0
+    return {
+        "missing": len(missing_ids),
+        "ingested": ingested,
+        "skipped": skipped,
+        "errors": errors,
+    }
 
 
 # ── Entry point ──────────────────────────────────────────────────────
@@ -209,8 +246,8 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)-5s %(name)s: %(message)s",
     )
-    exit_code = asyncio.run(_run())
-    sys.exit(exit_code)
+    result = asyncio.run(run_ingest())
+    sys.exit(1 if result["errors"] > 0 else 0)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Callable
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.shared.db import get_db_session
@@ -334,15 +334,24 @@ _METRIC_COMPUTERS: dict[
 # ── Orchestration ─────────────────────────────────────────────────────
 
 
-async def _run() -> int:
-    """Compute accuracy rollups.  Returns 0 on success."""
+async def run_compute() -> dict:
+    """Compute accuracy rollups and persist them **replace-in-place**.
+
+    The full (window × prediction_type) grid is recomputed every run, so the
+    table is wiped and the fresh grid inserted in ONE transaction — the table
+    holds exactly one current row per cell.  Idempotent: safe to run on a
+    schedule without accumulating duplicates.
+
+    Returns a counts dict::
+
+        {"pairs": int, "rollups_written": int, "with_data": int}
+    """
     async with get_db_session() as session:
         pairs = await _fetch_prediction_outcome_pairs(session)
 
     if not pairs:
         logger.info("No settled fixtures found, 0 rollups computed.")
-        print("No settled fixtures, 0 rollups computed.")
-        return 0
+        return {"pairs": 0, "rollups_written": 0, "with_data": 0}
 
     logger.info("Fetched %d prediction-outcome pairs.", len(pairs))
 
@@ -413,17 +422,32 @@ async def _run() -> int:
                 ),
             )
 
-    # Persist (append-only).
+    # Persist replace-in-place: wipe the table and insert the fresh full grid
+    # in one transaction so exactly one current row per (window, type) remains.
     async with get_db_session() as session:
+        await session.execute(delete(AccuracyRollup))
         session.add_all(rollup_rows)
         await session.commit()
 
     non_zero = sum(1 for r in rollup_rows if r.total_predictions > 0)
-    print(
-        f"\nAccuracy rollup complete: {len(rollup_rows)} rows inserted "
-        f"({non_zero} with data, "
-        f"{len(rollup_rows) - non_zero} with n=0)."
-    )
+    return {
+        "pairs": len(pairs),
+        "rollups_written": len(rollup_rows),
+        "with_data": non_zero,
+    }
+
+
+async def _run() -> int:
+    """CLI entry point: run the rollup, print a summary, return exit code 0."""
+    result = await run_compute()
+    if result["pairs"] == 0:
+        print("No settled fixtures, 0 rollups computed.")
+    else:
+        print(
+            f"\nAccuracy rollup complete: {result['rollups_written']} rows "
+            f"replaced ({result['with_data']} with data, "
+            f"{result['rollups_written'] - result['with_data']} with n=0)."
+        )
     return 0
 
 

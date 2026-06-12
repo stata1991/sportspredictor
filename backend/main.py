@@ -59,17 +59,19 @@ IPL_SERIES_ID = int(os.getenv("IPL_SERIES_ID", "9237"))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """App lifespan: start background scheduler on startup, cancel on shutdown."""
-    from backend.football.scheduler import start_scheduler
+    """App lifespan: start background schedulers on startup, cancel on shutdown."""
+    from backend.football.scheduler import start_eval_scheduler, start_scheduler
 
     scheduler_task = await start_scheduler()
+    eval_task = await start_eval_scheduler()
     yield
-    if scheduler_task is not None:
-        scheduler_task.cancel()
-        try:
-            await scheduler_task
-        except asyncio.CancelledError:
-            pass
+    for task in (scheduler_task, eval_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(

@@ -572,10 +572,24 @@ async def get_latest_reasoning(
 async def get_all_accuracy_rollups(
     session: AsyncSession,
 ) -> list[AccuracyRollup]:
-    """Fetch all accuracy rollup rows, ordered by window and type."""
-    stmt = select(AccuracyRollup).order_by(
-        AccuracyRollup.window,
-        AccuracyRollup.prediction_type,
+    """Fetch the latest rollup per (window, prediction_type).
+
+    ``compute_accuracy`` now replaces the grid in place, so there is normally
+    exactly one row per cell. The ``DISTINCT ON`` keeps this correct as
+    defence-in-depth against any historical duplicate rows — it returns only
+    the most recent (max ``computed_at``) row per (window, prediction_type).
+    """
+    stmt = (
+        select(AccuracyRollup)
+        .order_by(
+            AccuracyRollup.window,
+            AccuracyRollup.prediction_type,
+            AccuracyRollup.computed_at.desc(),
+        )
+        .distinct(
+            AccuracyRollup.window,
+            AccuracyRollup.prediction_type,
+        )
     )
     result = await session.execute(stmt)
     return list(result.scalars().all())

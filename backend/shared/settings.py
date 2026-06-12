@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     prewarm_window_start_minutes: int = 90
     prewarm_window_end_minutes: int = 150
 
+    # In-process evaluation scheduler.  When enabled, an asyncio loop runs
+    # ingest_outcomes -> compute_accuracy on startup, then every
+    # EVAL_INTERVAL_SECONDS, to keep the Track Record rollups current.  Set
+    # EVAL_SCHEDULER_ENABLED=true in EB env to activate; kill via env var
+    # without a code deploy.
+    eval_scheduler_enabled: bool = False
+    eval_interval_seconds: int = 1800
+
     @field_validator("database_url", mode="before")
     @classmethod
     def _rewrite_pg_dialect(cls, v: str) -> str:
