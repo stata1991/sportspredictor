@@ -7,7 +7,8 @@ import {
 
 describe('fixtureStatus', () => {
   describe('isInPlay', () => {
-    test.each(['1H', 'HT', '2H', 'ET', 'BT', 'P'])(
+    // 'LIVE' included for parity with backend _LIVE_STATUSES (LIVETAB-2).
+    test.each(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'LIVE'])(
       '%s → true',
       (s) => expect(isInPlay(s)).toBe(true),
     );

@@ -185,17 +185,118 @@ describe('useFixtures', () => {
     );
   });
 
-  test('idles (no polling) when no match is live', async () => {
+  // ── Cold-start discovery (LIVETAB-2) — the headline regression ─────
+
+  test('COLD START: a poll is armed even when nothing is live', async () => {
+    // The bug: before the fix, an all-NS mount armed NO timer and stayed at
+    // 1 call forever. Now the idle poll keeps running so a kickoff can be
+    // discovered. (This test would FAIL against the buggy implementation.)
     mockedApi.get.mockResolvedValue({
       data: { count: 1, fixtures: [fx(1, 'NS', null, null, null)] },
     });
 
-    renderHook(() => useFixtures({ liveRefreshIntervalMs: 30 }));
+    renderHook(() => useFixtures({ idleRefreshIntervalMs: 20 }));
+
+    await waitFor(
+      () => expect(mockedApi.get.mock.calls.length).toBeGreaterThan(1),
+      { timeout: 500 },
+    );
+  });
+
+  test('DISCOVERY: idle poll transitions idle → live without a reload', async () => {
+    // Mount with nothing live; the next poll returns a fixture now in 2H.
+    mockedApi.get
+      .mockResolvedValueOnce({
+        data: { count: 1, fixtures: [fx(1, 'NS', null, null, null)] },
+      })
+      .mockResolvedValue({
+        data: { count: 1, fixtures: [fx(1, '2H', 50, 1, 0)] },
+      });
+
+    const { result } = renderHook(() =>
+      useFixtures({ idleRefreshIntervalMs: 20, liveRefreshIntervalMs: 20 }),
+    );
+
+    // Starting from an all-NS mount (nothing live), the list ends up showing
+    // the 2H fixture. Its ONLY data source is a poll, so reaching 2H proves
+    // the idle→live discovery that was impossible before the fix.
+    await waitFor(
+      () => expect(result.current.fixtures[0]?.fixture.status.short).toBe('2H'),
+      { timeout: 500 },
+    );
+    // Mount used the plain endpoint; discovery came via the live-poll path.
+    expect(mockedApi.get).toHaveBeenCalledWith(
+      '/api/football/fixtures',
+      expect.anything(),
+    );
+    expect(mockedApi.get).toHaveBeenCalledWith(
+      '/api/football/fixtures?live=1',
+      expect.anything(),
+    );
+  });
+
+  test('cadence: idle uses the idle interval, not the live interval', async () => {
+    // idle long, live short. An all-NS mount must wait the IDLE interval, so
+    // within a short window past the (short) live interval there is no poll.
+    mockedApi.get.mockResolvedValue({
+      data: { count: 1, fixtures: [fx(1, 'NS', null, null, null)] },
+    });
+
+    renderHook(() =>
+      useFixtures({ idleRefreshIntervalMs: 10_000, liveRefreshIntervalMs: 20 }),
+    );
 
     await waitFor(() => expect(mockedApi.get).toHaveBeenCalledTimes(1));
-    // Wait well past several intervals — still only the initial load.
-    await new Promise((r) => setTimeout(r, 150));
+    // Past the live interval (20ms) but well short of the idle interval (10s):
+    // no extra poll, proving idle cadence is in effect.
+    await new Promise((r) => setTimeout(r, 120));
     expect(mockedApi.get).toHaveBeenCalledTimes(1);
+  });
+
+  test('visibility: becoming visible refetches even when nothing was live', async () => {
+    mockedApi.get.mockResolvedValue({
+      data: { count: 1, fixtures: [fx(1, 'NS', null, null, null)] },
+    });
+
+    renderHook(() => useFixtures({ idleRefreshIntervalMs: 10_000 }));
+    await waitFor(() => expect(mockedApi.get).toHaveBeenCalledTimes(1));
+
+    // Hide, then show — a match may have kicked off while hidden. The old
+    // code gated this on anyLive() (false for NS) and never refetched.
+    await act(async () => {
+      (document as unknown as { hidden: boolean }).hidden = true;
+      document.dispatchEvent(new Event('visibilitychange'));
+      (document as unknown as { hidden: boolean }).hidden = false;
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    await waitFor(() =>
+      expect(mockedApi.get.mock.calls.length).toBeGreaterThan(1),
+    );
+  });
+
+  test('document.hidden halts polling (battery/quota guard)', async () => {
+    mockedApi.get.mockResolvedValue({
+      data: { count: 1, fixtures: [fx(1, '1H', 10, 0, 0)] },
+    });
+
+    renderHook(() => useFixtures({ liveRefreshIntervalMs: 20 }));
+    await waitFor(() =>
+      expect(mockedApi.get.mock.calls.length).toBeGreaterThan(1),
+    );
+
+    await act(async () => {
+      (document as unknown as { hidden: boolean }).hidden = true;
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    const callsWhenHidden = mockedApi.get.mock.calls.length;
+
+    // No further polls while hidden.
+    await new Promise((r) => setTimeout(r, 120));
+    expect(mockedApi.get.mock.calls.length).toBe(callsWhenHidden);
+
+    // Restore for following tests.
+    (document as unknown as { hidden: boolean }).hidden = false;
   });
 
   test('a poll tick only ever hits the fixtures endpoint (no prediction calls)', async () => {

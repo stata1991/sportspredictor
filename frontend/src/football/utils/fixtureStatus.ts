@@ -6,7 +6,11 @@
  * detect_stage() logic without importing Python.
  */
 
-export const IN_PLAY = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P']);
+// Mirrors the backend _LIVE_STATUSES. 'LIVE' is included for parity: football
+// reports 1H/2H/etc, but API-Football emits 'LIVE' for some feeds, and the
+// frontend/backend sets diverging is a latent version of the LIVETAB cold-start
+// empty (a live fixture the frontend would classify as not-in-play).
+export const IN_PLAY = new Set(['1H', 'HT', '2H', 'ET', 'BT', 'P', 'LIVE']);
 export const COMPLETED = new Set(['FT', 'AET', 'PEN']);
 export const PRE_MATCH = new Set(['NS', 'TBD']);
 export const NOT_PREDICTABLE = new Set([
