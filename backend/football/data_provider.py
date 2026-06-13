@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -50,6 +50,38 @@ from backend.football.schemas import (
 from backend.shared.async_singleflight import AsyncSingleflight
 
 logger = logging.getLogger(__name__)
+
+
+# In-play status codes (mirrors routes._LIVE_STATUSES / frontend IN_PLAY).
+_LIVE_STATUS_SHORT: frozenset[str] = frozenset(
+    {"1H", "2H", "HT", "ET", "BT", "P", "LIVE"}
+)
+
+
+def _fixtures_list_ttl(items: list[dict[str, Any]]) -> int:
+    """Live-aware TTL for the NON-live fixtures list (LIVETAB-5).
+
+    Returns the short live TTL when the schedule is volatile — any fixture
+    in-play, OR kicking off within the long-TTL window (so a freshly-written
+    long entry can't swallow a kickoff that lands before it expires).
+    Otherwise the long schedule TTL. This keeps the Schedule tab fresh
+    during and just before matches without refetching the static schedule
+    overnight. One shared key, so the short-TTL refetches are trivial.
+    """
+    short_ttl = ENDPOINT_TTLS["fixtures_list_live"]
+    long_ttl = ENDPOINT_TTLS["fixtures_list"]
+    now = time.time()
+    for item in items:
+        fixture = item.get("fixture") or {}
+        status = (fixture.get("status") or {}).get("short")
+        if status in _LIVE_STATUS_SHORT:
+            return short_ttl
+        ts = fixture.get("timestamp")
+        # Kicks off within the window we'd otherwise cache for → don't cache
+        # long, or the kickoff would go unseen until the entry expires.
+        if isinstance(ts, (int, float)) and 0 <= ts - now <= long_ttl:
+            return short_ttl
+    return long_ttl
 
 
 class APIFootballClient:
@@ -117,6 +149,7 @@ class APIFootballClient:
         cache_method: str,
         ttl: int,
         stale_fallback: bool = True,
+        ttl_resolver: Callable[[list[dict[str, Any]]], int] | None = None,
     ) -> list[dict[str, Any]]:
         """Central HTTP + cache + error-handling pipeline.
 
@@ -341,12 +374,21 @@ class APIFootballClient:
                 )
 
             # ── 9. Cache the successful response ──────────────────
-            self._cache.set(key, response_data, ttl)
+            # The write TTL may depend on the response (e.g. the non-live
+            # fixtures list shortens its TTL when a match is live/imminent).
+            # This does NOT change the freshness check, which still judges by
+            # the stored entry's TTL — it only lets the writer pick that TTL.
+            write_ttl = (
+                ttl_resolver(response_data)
+                if ttl_resolver is not None
+                else ttl
+            )
+            self._cache.set(key, response_data, write_ttl)
             if stale_fallback:
                 self._cache.set(
                     stale_key,
                     response_data,
-                    ttl * STALE_TTL_MULTIPLIER,
+                    write_ttl * STALE_TTL_MULTIPLIER,
                 )
 
             # ── 10. Log success ───────────────────────────────────
@@ -379,22 +421,33 @@ class APIFootballClient:
     ) -> list[AFFixture]:
         """List all fixtures for a league/season.
 
-        When ``live`` is True the response is cached with a short TTL
-        (``fixtures_list_live``) so in-play score/minute stay fresh during a
-        match; otherwise the long schedule TTL applies. Same cache key either
-        way, so live polling keeps the shared entry warm for all readers.
+        Live and non-live use **distinct cache keys** (``fixtures_live`` vs
+        ``fixtures``) — LIVETAB-5. Sharing one key let a non-live 3600s write
+        poison the 30s live read for up to an hour (the freshness check
+        judges by the stored entry's TTL, not the reader's), so the Live tab
+        served stale ``NS`` through whole matches.
+
+        - ``live=True``: own short-TTL key (``fixtures_list_live``), never
+          touched by a non-live write.
+        - ``live=False``: live-aware TTL (:func:`_fixtures_list_ttl`) — short
+          while any fixture is in-play or imminent, long only when genuinely
+          idle — so the Schedule tab stays fresh during matches too.
         """
-        ttl = (
-            ENDPOINT_TTLS["fixtures_list_live"]
-            if live
-            else ENDPOINT_TTLS["fixtures_list"]
-        )
-        items = await self._request(
-            "/fixtures",
-            {"league": league, "season": season},
-            cache_method="fixtures",
-            ttl=ttl,
-        )
+        if live:
+            items = await self._request(
+                "/fixtures",
+                {"league": league, "season": season},
+                cache_method="fixtures_live",
+                ttl=ENDPOINT_TTLS["fixtures_list_live"],
+            )
+        else:
+            items = await self._request(
+                "/fixtures",
+                {"league": league, "season": season},
+                cache_method="fixtures",
+                ttl=ENDPOINT_TTLS["fixtures_list"],
+                ttl_resolver=_fixtures_list_ttl,
+            )
         return [AFFixture.model_validate(item) for item in items]
 
     async def get_fixture(self, fixture_id: int) -> AFFixture | None:

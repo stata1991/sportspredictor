@@ -386,3 +386,107 @@ async def test_get_coverage_extracts_season() -> None:
     assert cov.standings is True
     assert cov.predictions is True
     assert cov.fixtures_events is False
+
+
+# ── Fixtures-list cache poisoning fix (LIVETAB-5) ─────────────────────
+
+import time as _time  # noqa: E402
+
+from backend.football.constants import ENDPOINT_TTLS  # noqa: E402
+from backend.football.data_provider import _fixtures_list_ttl  # noqa: E402
+
+
+def _live_item(status: str = "2H", elapsed: int = 55, ts: int | None = None) -> dict:
+    """A fixture item with an in-play status (deep-copied from _FIXTURE_ITEM)."""
+    import copy
+    item = copy.deepcopy(_FIXTURE_ITEM)
+    item["fixture"]["status"] = {"long": "Second Half", "short": status, "elapsed": elapsed}
+    item["goals"] = {"home": 1, "away": 0}
+    if ts is not None:
+        item["fixture"]["timestamp"] = ts
+    return item
+
+
+def test_live_and_nonlive_fixtures_keys_differ() -> None:
+    """The two modes must use DISTINCT cache keys (no shared poisoning)."""
+    p = {"league": 1, "season": 2026}
+    assert (
+        APIFootballClient._cache_key("fixtures", p)
+        != APIFootballClient._cache_key("fixtures_live", p)
+    )
+
+
+@respx.mock
+async def test_nonlive_write_does_not_poison_live_read() -> None:
+    """The LIVETAB-4 scenario: a non-live NS write must NOT satisfy a later
+    live read. Distinct keys → the live read refetches and sees the kickoff."""
+    route = respx.get(f"{BASE_URL}/fixtures").mock(
+        side_effect=[
+            # 1st call (non-live): everything NS.
+            httpx.Response(200, json=_wrap([_FIXTURE_ITEM]), headers=_RATE_LIMIT_HEADERS),
+            # 2nd call (live): the match has kicked off.
+            httpx.Response(200, json=_wrap([_live_item()]), headers=_RATE_LIMIT_HEADERS),
+        ]
+    )
+    client, *_ = _fresh_client()
+    async with client:
+        non_live = await client.get_fixtures(live=False)   # writes "fixtures" key (NS, long TTL)
+        live = await client.get_fixtures(live=True)         # distinct key → must refetch
+
+    assert non_live[0].fixture.status.short == "NS"
+    assert live[0].fixture.status.short == "2H"             # NOT the stale NS
+    assert route.call_count == 2                            # both hit upstream (keys differ)
+
+
+@respx.mock
+async def test_live_list_has_its_own_cached_key() -> None:
+    """Two live reads share the live key (cached), independent of non-live."""
+    route = respx.get(f"{BASE_URL}/fixtures").mock(
+        return_value=httpx.Response(200, json=_wrap([_live_item()]), headers=_RATE_LIMIT_HEADERS),
+    )
+    client, cache, _ = _fresh_client()
+    async with client:
+        await client.get_fixtures(live=True)
+        await client.get_fixtures(live=True)   # cached on the live key
+
+    assert route.call_count == 1
+    live_key = APIFootballClient._cache_key("fixtures_live", {"league": 1, "season": 2026})
+    assert cache.get(live_key) is not None
+
+
+# ── Live-aware non-live TTL (Schedule freshness) ──────────────────────
+
+
+def test_fixtures_list_ttl_short_when_a_match_is_live() -> None:
+    items = [{"fixture": {"status": {"short": "2H"}, "timestamp": int(_time.time())}}]
+    assert _fixtures_list_ttl(items) == ENDPOINT_TTLS["fixtures_list_live"]
+
+
+def test_fixtures_list_ttl_short_when_a_kickoff_is_imminent() -> None:
+    # NS but kicks off in 10 min — must not be cached for the long window,
+    # or the kickoff would go unseen until the entry expires.
+    soon = int(_time.time()) + 600
+    items = [{"fixture": {"status": {"short": "NS"}, "timestamp": soon}}]
+    assert _fixtures_list_ttl(items) == ENDPOINT_TTLS["fixtures_list_live"]
+
+
+def test_fixtures_list_ttl_long_when_idle() -> None:
+    # Nothing live, next kickoff well beyond the long window → long TTL,
+    # so we don't refetch the static schedule overnight (no regression).
+    far = int(_time.time()) + ENDPOINT_TTLS["fixtures_list"] + 7200
+    items = [{"fixture": {"status": {"short": "NS"}, "timestamp": far}}]
+    assert _fixtures_list_ttl(items) == ENDPOINT_TTLS["fixtures_list"]
+
+
+def test_fixtures_list_ttl_long_when_empty() -> None:
+    assert _fixtures_list_ttl([]) == ENDPOINT_TTLS["fixtures_list"]
+
+
+def test_fixtures_list_ttl_any_live_fixture_shortens_whole_list() -> None:
+    far = int(_time.time()) + ENDPOINT_TTLS["fixtures_list"] + 7200
+    items = [
+        {"fixture": {"status": {"short": "FT"}, "timestamp": far - 100000}},
+        {"fixture": {"status": {"short": "NS"}, "timestamp": far}},
+        {"fixture": {"status": {"short": "1H"}, "timestamp": int(_time.time())}},  # one live
+    ]
+    assert _fixtures_list_ttl(items) == ENDPOINT_TTLS["fixtures_list_live"]
