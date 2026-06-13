@@ -463,6 +463,114 @@ class TestPredictLive:
         assert body["cached"] is True
         assert body["predictions"]["live_winner"]["elapsed"] == 60
 
+    # ── Live statistics (STATS-A) ────────────────────────────────────
+
+    def _stats_payload(self, home_id: int, away_id: int):
+        return [
+            {
+                "team": {"id": away_id, "name": "Germany"},  # away FIRST
+                "statistics": [
+                    {"type": "Ball Possession", "value": "40%"},
+                    {"type": "Total Shots", "value": 6},
+                    {"type": "Shots on Goal", "value": 2},
+                ],
+            },
+            {
+                "team": {"id": home_id, "name": "Brazil"},
+                "statistics": [
+                    {"type": "Ball Possession", "value": "60%"},
+                    {"type": "Total Shots", "value": 11},
+                    {"type": "Shots on Goal", "value": 5},
+                ],
+            },
+        ]
+
+    @patch("backend.football.routes.save_live_prediction")
+    @patch("backend.football.routes.get_cached_live_prediction")
+    @patch("backend.football.routes._get_engine")
+    async def test_live_includes_statistics_with_home_away_association(
+        self, mock_engine_fn, mock_cache_fn, mock_save_fn
+    ):
+        fx = _make_fixture(
+            status_short="1H", status_long="First Half",
+            elapsed=30, home_goals=1, away_goals=0,
+        )
+        home_id = fx.teams.home.id
+        away_id = fx.teams.away.id
+        self.mock_client.get_fixture = AsyncMock(return_value=fx)
+        self.mock_client.get_statistics = AsyncMock(
+            return_value=self._stats_payload(home_id, away_id)
+        )
+        mock_cache_fn.return_value = None
+        mock_engine = MagicMock()
+        mock_engine.model.predict_match.return_value = {
+            "lambda_home": 1.5, "lambda_away": 1.0, "confidence": "normal",
+        }
+        mock_engine_fn.return_value = mock_engine
+        mock_save_fn.return_value = MagicMock()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/live/100")
+
+        assert resp.status_code == 200
+        stats = resp.json()["statistics"]
+        assert stats is not None
+        # Association by team id holds despite away-block-first ordering.
+        assert stats["home"]["possession"] == 60
+        assert stats["away"]["possession"] == 40
+        assert stats["home"]["shots_on_goal"] == 5
+        assert stats["away"]["shots_total"] == 6
+        self.mock_client.get_statistics.assert_awaited_once_with(100)
+
+    async def test_statistics_not_fetched_for_pre_match(self):
+        fx = _make_fixture(status_short="NS")
+        self.mock_client.get_fixture = AsyncMock(return_value=fx)
+        self.mock_client.get_statistics = AsyncMock(return_value=[])
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/live/100")
+
+        assert resp.status_code == 422
+        # Non-live fixtures must never trigger a statistics call.
+        self.mock_client.get_statistics.assert_not_called()
+
+    @patch("backend.football.routes.save_live_prediction")
+    @patch("backend.football.routes.get_cached_live_prediction")
+    @patch("backend.football.routes._get_engine")
+    async def test_statistics_failure_degrades_to_null_not_500(
+        self, mock_engine_fn, mock_cache_fn, mock_save_fn
+    ):
+        fx = _make_fixture(
+            status_short="2H", status_long="Second Half",
+            elapsed=70, home_goals=2, away_goals=1,
+        )
+        self.mock_client.get_fixture = AsyncMock(return_value=fx)
+        self.mock_client.get_statistics = AsyncMock(
+            side_effect=RuntimeError("upstream 503")
+        )
+        mock_cache_fn.return_value = None
+        mock_engine = MagicMock()
+        mock_engine.model.predict_match.return_value = {
+            "lambda_home": 1.4, "lambda_away": 1.1, "confidence": "normal",
+        }
+        mock_engine_fn.return_value = mock_engine
+        mock_save_fn.return_value = MagicMock()
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/live/100")
+
+        # Prediction still succeeds; stats just degrade to null.
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["statistics"] is None
+        assert body["predictions"]["live_winner"]["elapsed"] == 70
+
 
 # ── History endpoint ─────────────────────────────────────────────────
 

@@ -29,6 +29,7 @@ from backend.football.agent.upset import UpsetOutput, compute_upset_index
 from backend.football.constants import BASE_URL, WC_LEAGUE_ID, WC_SEASON
 from backend.football.data_provider import APIFootballClient
 from backend.football.deps import get_agent_client, get_football_client
+from backend.football.live_stats import normalize_fixture_statistics
 from backend.football.exceptions import (
     APIFootballError,
     PlanLimitationError,
@@ -682,6 +683,32 @@ async def predict_pre_match(
     }
 
 
+async def _fetch_live_statistics(
+    client: APIFootballClient,
+    fixture_id: int,
+    home_team_id: int,
+    away_team_id: int,
+) -> dict[str, Any] | None:
+    """Fetch + normalize in-play team statistics, best-effort.
+
+    Display-only and non-critical: any upstream/parse failure logs a
+    warning and returns ``None`` so the live prediction response is never
+    degraded by a stats hiccup. Returns a JSON-safe dict (or ``None`` when
+    stats have not populated yet).
+    """
+    try:
+        raw = await client.get_statistics(fixture_id)
+        stats = normalize_fixture_statistics(raw, home_team_id, away_team_id)
+        return stats.model_dump(mode="json") if stats is not None else None
+    except Exception as exc:  # noqa: BLE001 — stats must never break prediction
+        logger.warning(
+            "Live statistics unavailable for fixture %d: %s",
+            fixture_id,
+            exc,
+        )
+        return None
+
+
 @router.get("/predict/live/{fixture_id}")
 async def predict_live(
     fixture_id: int,
@@ -748,6 +775,16 @@ async def predict_live(
     home_goals = fx.goals.home or 0
     away_goals = fx.goals.away or 0
 
+    # ── Live statistics (display-only, best-effort) ─────────────
+    # One statistics call per live fixture, fetched only after the in-play
+    # gate above (non-live statuses already returned/raised). The data
+    # provider caches it on a short live TTL so it stays fresh on the same
+    # poll tick as the score. Display-only: a stats failure degrades to
+    # null and never affects the probabilistic prediction below.
+    statistics = await _fetch_live_statistics(
+        client, fixture_id, fx.teams.home.id, fx.teams.away.id
+    )
+
     # ── Check DB cache (30s TTL, keyed by elapsed minute) ───────
     cached_row = await get_cached_live_prediction(
         session, fixture_id, elapsed
@@ -762,6 +799,7 @@ async def predict_live(
             "stage": "live",
             "cached": True,
             "predictions": {"live_winner": cached_row.payload},
+            "statistics": statistics,
         }
 
     # ── Get pre-match lambdas ───────────────────────────────────
@@ -800,6 +838,7 @@ async def predict_live(
         "confidence": raw["confidence"],
         "cached": False,
         "predictions": {"live_winner": live},
+        "statistics": statistics,
     }
 
 

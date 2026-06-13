@@ -197,4 +197,90 @@ describe('LiveMatchSection', () => {
     expect(callArgs.url).toBe('/api/football/predict/live/100');
     expect(callArgs.intervalMs).toBe(60_000);
   });
+
+  // ── Live stats integration (STATS-A) ───────────────────────────────
+
+  const STATS_DATA: LiveResponse = {
+    ...MOCK_LIVE_DATA,
+    statistics: {
+      home: {
+        possession: 58, shots_total: 9, shots_on_goal: 4, corners: 5,
+        fouls: 7, yellow_cards: 1, red_cards: 0, goalkeeper_saves: 2,
+      },
+      away: {
+        possession: 42, shots_total: 5, shots_on_goal: 1, corners: 2,
+        fouls: 11, yellow_cards: 2, red_cards: 0, goalkeeper_saves: 3,
+      },
+    },
+  };
+
+  test('renders the live stats panel when statistics are present', () => {
+    mockUseLivePolling.mockReturnValue({
+      data: STATS_DATA,
+      error: null,
+      isPolling: true,
+      lastUpdated: new Date(),
+      refetch: mockRefetch,
+    });
+
+    render(<LiveMatchSection {...defaultProps} />);
+
+    expect(screen.getByTestId('live-stats-panel')).toBeInTheDocument();
+    expect(screen.getByTestId('possession-home-pct')).toHaveTextContent('58%');
+    expect(screen.getByTestId('stat-row-shots_total')).toHaveTextContent('9');
+  });
+
+  test('stats panel shows "coming in" when statistics are null (early match)', () => {
+    mockUseLivePolling.mockReturnValue({
+      data: { ...MOCK_LIVE_DATA, statistics: null },
+      error: null,
+      isPolling: true,
+      lastUpdated: new Date(),
+      refetch: mockRefetch,
+    });
+
+    render(<LiveMatchSection {...defaultProps} />);
+
+    expect(screen.getByTestId('live-stats-pending')).toBeInTheDocument();
+  });
+
+  test('stats refresh on the same poll tick as the score (single data source)', () => {
+    // First tick: 2–1 with 58% possession.
+    mockUseLivePolling.mockReturnValue({
+      data: STATS_DATA,
+      error: null,
+      isPolling: true,
+      lastUpdated: new Date(),
+      refetch: mockRefetch,
+    });
+    const { rerender } = render(<LiveMatchSection {...defaultProps} />);
+    expect(screen.getByTestId('live-score')).toHaveTextContent('2 — 1');
+    expect(screen.getByTestId('possession-home-pct')).toHaveTextContent('58%');
+
+    // Next poll tick delivers new score AND new stats together — one source.
+    mockUseLivePolling.mockReturnValue({
+      data: {
+        ...STATS_DATA,
+        predictions: {
+          live_winner: {
+            ...STATS_DATA.predictions.live_winner,
+            current_score: { home: 3, away: 1 },
+          },
+        },
+        statistics: {
+          ...STATS_DATA.statistics!,
+          home: { ...STATS_DATA.statistics!.home, possession: 63 },
+          away: { ...STATS_DATA.statistics!.away, possession: 37 },
+        },
+      },
+      error: null,
+      isPolling: true,
+      lastUpdated: new Date(),
+      refetch: mockRefetch,
+    });
+    rerender(<LiveMatchSection {...defaultProps} />);
+
+    expect(screen.getByTestId('live-score')).toHaveTextContent('3 — 1');
+    expect(screen.getByTestId('possession-home-pct')).toHaveTextContent('63%');
+  });
 });

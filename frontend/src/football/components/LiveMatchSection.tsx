@@ -12,7 +12,9 @@ import { useLivePolling } from '../hooks/useLivePolling';
 import { isInPlay } from '../utils/fixtureStatus';
 import { colors } from '../colors';
 import { formatPercent } from '../utils/probability';
+import { FixtureStatistics } from '../types/statistics';
 import LiveBadge from './LiveBadge';
+import LiveStatsPanel from './LiveStatsPanel';
 
 // ── Response type (mirrors backend predict_live return) ─────────────
 
@@ -36,6 +38,10 @@ export interface LiveResponse {
   predictions: {
     live_winner: LiveWinner;
   };
+  // Display-only in-play stats; null until they populate (early minutes)
+  // or if the upstream stats fetch degraded. Arrives on the same poll tick
+  // as the score, so it refreshes without a separate interval.
+  statistics?: FixtureStatistics | null;
 }
 
 // ── Props ───────────────────────────────────────────────────────────
@@ -297,6 +303,13 @@ const LiveMatchSection: React.FC<LiveMatchSectionProps> = ({
         pHome={lw.p_home_win}
         pDraw={lw.p_draw}
         pAway={lw.p_away_win}
+        homeTeam={data!.home_team}
+        awayTeam={data!.away_team}
+      />
+
+      {/* Live stats — display only; refreshes on the same poll tick as score */}
+      <LiveStatsPanel
+        stats={data!.statistics ?? null}
         homeTeam={data!.home_team}
         awayTeam={data!.away_team}
       />
