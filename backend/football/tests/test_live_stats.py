@@ -5,6 +5,9 @@ from __future__ import annotations
 from backend.football.live_stats import (
     FixtureStatistics,
     TeamMatchStatistics,
+    compute_lean,
+    favoured_side,
+    lean_agrees_with_prediction,
     normalize_fixture_statistics,
 )
 
@@ -209,3 +212,98 @@ class TestEmptyInput:
         dumped = result.model_dump(mode="json")
         assert dumped["home"]["possession"] == 65
         assert dumped["away"]["red_cards"] == 1
+
+
+# ── Lean signal (STATS-B; engine-owned, deterministic) ───────────────
+
+
+def _stats(home: dict, away: dict) -> FixtureStatistics:
+    return FixtureStatistics(
+        home=TeamMatchStatistics(**home),
+        away=TeamMatchStatistics(**away),
+    )
+
+
+class TestComputeLean:
+    def test_clear_home_lean(self):
+        s = _stats(
+            home={"shots_on_goal": 6, "shots_total": 14, "possession": 62, "corners": 8},
+            away={"shots_on_goal": 1, "shots_total": 4, "possession": 38, "corners": 2},
+        )
+        lean = compute_lean(s)
+        assert lean.leaning_side == "home"
+        assert lean.score > 0
+
+    def test_clear_away_lean(self):
+        s = _stats(
+            home={"shots_on_goal": 1, "shots_total": 3, "possession": 35, "corners": 1},
+            away={"shots_on_goal": 5, "shots_total": 12, "possession": 65, "corners": 6},
+        )
+        lean = compute_lean(s)
+        assert lean.leaning_side == "away"
+        assert lean.score < 0
+
+    def test_even_near_parity(self):
+        s = _stats(
+            home={"shots_on_goal": 3, "shots_total": 8, "possession": 51, "corners": 4},
+            away={"shots_on_goal": 3, "shots_total": 8, "possession": 49, "corners": 4},
+        )
+        lean = compute_lean(s)
+        assert lean.leaning_side == "even"
+
+    def test_lone_one_sog_edge_stays_even(self):
+        # A single shot-on-goal edge with nothing else = score 1.0, not > threshold.
+        s = _stats(
+            home={"shots_on_goal": 1, "shots_total": None, "possession": None, "corners": None},
+            away={"shots_on_goal": 0, "shots_total": None, "possession": None, "corners": None},
+        )
+        assert compute_lean(s).leaning_side == "even"
+
+    def test_no_stats_is_even(self):
+        assert compute_lean(None).leaning_side == "even"
+        assert compute_lean(None).contributing == 0
+
+    def test_all_null_is_even(self):
+        s = _stats(home={}, away={})
+        lean = compute_lean(s)
+        assert lean.leaning_side == "even"
+        assert lean.contributing == 0
+
+    def test_deterministic(self):
+        s = _stats(
+            home={"shots_on_goal": 5, "shots_total": 11, "possession": 58, "corners": 6},
+            away={"shots_on_goal": 2, "shots_total": 6, "possession": 42, "corners": 3},
+        )
+        assert compute_lean(s) == compute_lean(s)
+
+    def test_only_populated_metrics_contribute(self):
+        s = _stats(
+            home={"shots_on_goal": 5, "shots_total": None, "possession": None, "corners": None},
+            away={"shots_on_goal": 1, "shots_total": None, "possession": None, "corners": None},
+        )
+        lean = compute_lean(s)
+        assert lean.contributing == 1
+        assert lean.leaning_side == "home"  # 4 * 1.0 = 4.0 > 1.0
+
+
+class TestFavouredSide:
+    def test_home_favoured(self):
+        assert favoured_side(0.55, 0.25) == "home"
+
+    def test_away_favoured(self):
+        assert favoured_side(0.20, 0.50) == "away"
+
+    def test_dead_heat_even(self):
+        assert favoured_side(0.40, 0.40) == "even"
+
+
+class TestLeanAgreement:
+    def test_agrees_when_same_side(self):
+        assert lean_agrees_with_prediction("home", "home") is True
+
+    def test_disagrees_when_opposite(self):
+        assert lean_agrees_with_prediction("away", "home") is False
+
+    def test_even_lean_never_contradicts(self):
+        assert lean_agrees_with_prediction("even", "home") is True
+        assert lean_agrees_with_prediction("even", "away") is True

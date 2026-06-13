@@ -28,8 +28,9 @@ from backend.football.agent.reasoning import (
 from backend.football.agent.upset import UpsetOutput, compute_upset_index
 from backend.football.constants import BASE_URL, WC_LEAGUE_ID, WC_SEASON
 from backend.football.data_provider import APIFootballClient
+from backend.football.agent.live_narration import maybe_generate_live_narration
 from backend.football.deps import get_agent_client, get_football_client
-from backend.football.live_stats import normalize_fixture_statistics
+from backend.football.live_stats import FixtureStatistics, normalize_fixture_statistics
 from backend.football.exceptions import (
     APIFootballError,
     PlanLimitationError,
@@ -688,18 +689,18 @@ async def _fetch_live_statistics(
     fixture_id: int,
     home_team_id: int,
     away_team_id: int,
-) -> dict[str, Any] | None:
+) -> FixtureStatistics | None:
     """Fetch + normalize in-play team statistics, best-effort.
 
     Display-only and non-critical: any upstream/parse failure logs a
     warning and returns ``None`` so the live prediction response is never
-    degraded by a stats hiccup. Returns a JSON-safe dict (or ``None`` when
-    stats have not populated yet).
+    degraded by a stats hiccup. Returns the normalized model (or ``None``
+    when stats have not populated yet); callers serialize for the response
+    and feed the same object to the lean signal.
     """
     try:
         raw = await client.get_statistics(fixture_id)
-        stats = normalize_fixture_statistics(raw, home_team_id, away_team_id)
-        return stats.model_dump(mode="json") if stats is not None else None
+        return normalize_fixture_statistics(raw, home_team_id, away_team_id)
     except Exception as exc:  # noqa: BLE001 — stats must never break prediction
         logger.warning(
             "Live statistics unavailable for fixture %d: %s",
@@ -709,12 +710,48 @@ async def _fetch_live_statistics(
         return None
 
 
+async def _maybe_live_note(
+    session: AsyncSession,
+    agent_client: AnthropicAgentClient | None,
+    fx: Any,
+    status: str,
+    elapsed: int,
+    winner_payload: dict[str, Any],
+    statistics: FixtureStatistics | None,
+) -> dict[str, Any] | None:
+    """Run the event-driven live-narration coordinator, best-effort.
+
+    Any failure degrades to ``None`` (absent) and never breaks the live
+    response. The coordinator itself enforces the trigger/floor/concurrency
+    rules and only calls the LLM when a trigger fires inside its budget.
+    """
+    try:
+        return await maybe_generate_live_narration(
+            session,
+            agent_client,
+            fixture_id=fx.fixture.id,
+            home_team=fx.teams.home.name,
+            away_team=fx.teams.away.name,
+            goals_home=fx.goals.home or 0,
+            goals_away=fx.goals.away or 0,
+            status=status,
+            elapsed=elapsed,
+            statistics=statistics,
+            p_home_win=float(winner_payload.get("p_home_win", 0.0)),
+            p_away_win=float(winner_payload.get("p_away_win", 0.0)),
+        )
+    except Exception as exc:  # noqa: BLE001 — narration must never break prediction
+        logger.warning("Live narration coordinator failed for %d: %s", fx.fixture.id, exc)
+        return None
+
+
 @router.get("/predict/live/{fixture_id}")
 async def predict_live(
     fixture_id: int,
     response: Response,
     client: APIFootballClient = Depends(get_football_client),
     session: AsyncSession = Depends(get_session),
+    agent_client: AnthropicAgentClient | None = Depends(get_agent_client),
 ) -> dict:
     """V1 live prediction using lambda-remaining heuristic.
 
@@ -791,6 +828,10 @@ async def predict_live(
     )
     if cached_row is not None:
         _set_cache(response, _CC_LIVE_PRED)
+        live_note = await _maybe_live_note(
+            session, agent_client, fx, status, elapsed,
+            cached_row.payload, statistics,
+        )
         return {
             "fixture_id": fixture_id,
             "home_team": fx.teams.home.name,
@@ -799,7 +840,8 @@ async def predict_live(
             "stage": "live",
             "cached": True,
             "predictions": {"live_winner": cached_row.payload},
-            "statistics": statistics,
+            "statistics": statistics.model_dump(mode="json") if statistics else None,
+            "live_note": live_note,
         }
 
     # ── Get pre-match lambdas ───────────────────────────────────
@@ -828,6 +870,10 @@ async def predict_live(
         elapsed,
     )
 
+    live_note = await _maybe_live_note(
+        session, agent_client, fx, status, elapsed, live, statistics,
+    )
+
     _set_cache(response, _CC_LIVE_PRED)
     return {
         "fixture_id": fixture_id,
@@ -838,7 +884,8 @@ async def predict_live(
         "confidence": raw["confidence"],
         "cached": False,
         "predictions": {"live_winner": live},
-        "statistics": statistics,
+        "statistics": statistics.model_dump(mode="json") if statistics else None,
+        "live_note": live_note,
     }
 
 

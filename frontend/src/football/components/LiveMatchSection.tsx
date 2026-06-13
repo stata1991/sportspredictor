@@ -12,9 +12,10 @@ import { useLivePolling } from '../hooks/useLivePolling';
 import { isInPlay } from '../utils/fixtureStatus';
 import { colors } from '../colors';
 import { formatPercent } from '../utils/probability';
-import { FixtureStatistics } from '../types/statistics';
+import { FixtureStatistics, LiveNote as LiveNoteType } from '../types/statistics';
 import LiveBadge from './LiveBadge';
 import LiveStatsPanel from './LiveStatsPanel';
+import LiveNote from './LiveNote';
 
 // ── Response type (mirrors backend predict_live return) ─────────────
 
@@ -42,6 +43,9 @@ export interface LiveResponse {
   // or if the upstream stats fetch degraded. Arrives on the same poll tick
   // as the score, so it refreshes without a separate interval.
   statistics?: FixtureStatistics | null;
+  // Event-driven "why" read; null before the first trigger. Updates on the
+  // same tick as score when a trigger fires, otherwise reused verbatim.
+  live_note?: LiveNoteType | null;
 }
 
 // ── Props ───────────────────────────────────────────────────────────
@@ -306,6 +310,9 @@ const LiveMatchSection: React.FC<LiveMatchSectionProps> = ({
         homeTeam={data!.home_team}
         awayTeam={data!.away_team}
       />
+
+      {/* Event-driven "why" read — reactive narration, never overrides the bar */}
+      <LiveNote note={data!.live_note ?? null} />
 
       {/* Live stats — display only; refreshes on the same poll tick as score */}
       <LiveStatsPanel

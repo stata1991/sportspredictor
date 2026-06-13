@@ -12,6 +12,7 @@ a 2-retry circuit breaker.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -339,6 +340,47 @@ class AnthropicAgentClient:
         self._log_cost(cost, context.fixture_id)
 
         return self._parse_result(raw_text), cost
+
+    async def generate_live_note(
+        self,
+        system_prompt: str,
+        user_message: str,
+        max_tokens: int = 160,
+    ) -> tuple[str, AgentCostMetrics]:
+        """Single short text completion for live in-play narration (STATS-B).
+
+        Returns plain text (1-2 sentences), NOT the structured reasoning
+        JSON. Runs the blocking SDK call in a worker thread so the live
+        request's event loop is not stalled during generation. One attempt
+        (no multi-turn loop); the caller treats any error as best-effort.
+        """
+        t0 = time.monotonic()
+        cost = AgentCostMetrics(total_turns=1)
+
+        def _blocking_call() -> Any:
+            return self._client.messages.create(
+                model=AGENT_MODEL,
+                max_tokens=max_tokens,
+                system=[{
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }],
+                messages=[{"role": "user", "content": user_message}],
+            )
+
+        response = await asyncio.to_thread(_blocking_call)
+
+        usage = response.usage
+        cost.input_tokens = usage.input_tokens
+        cost.output_tokens = usage.output_tokens
+        if hasattr(usage, "cache_creation_input_tokens"):
+            cost.cache_creation_input_tokens = usage.cache_creation_input_tokens or 0
+        if hasattr(usage, "cache_read_input_tokens"):
+            cost.cache_read_input_tokens = usage.cache_read_input_tokens or 0
+        cost.elapsed_seconds = time.monotonic() - t0
+
+        return self._extract_text(response).strip(), cost
 
     def _call_api(
         self,

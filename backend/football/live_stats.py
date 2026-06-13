@@ -19,6 +19,7 @@ shapes raw numbers for the UI to render.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -187,3 +188,88 @@ def normalize_fixture_statistics(
             else TeamMatchStatistics()
         ),
     )
+
+
+# ── Lean signal (STATS-B; engine-owned, deterministic) ───────────────
+#
+# A code-computed read of which side the in-play numbers lean toward.
+# THIS IS THE ENGINE'S JOB, NOT THE LLM'S — the narration model is later
+# handed this result and only narrates it; it never decides who is on top.
+#
+# Formula: a signed weighted sum of home-minus-away differentials over the
+# four most threat-indicative stats. Positive → home; negative → away;
+# inside a dead-band around zero → "even". Weights below; a metric only
+# contributes when BOTH sides have a value (early-match nulls are skipped,
+# so the lean stays "even" until real numbers arrive).
+
+LEAN_WEIGHTS: dict[str, float] = {
+    "shots_on_goal": 1.0,   # clearest single threat signal
+    "shots_total": 0.3,     # volume of attacking intent
+    "possession": 0.03,     # per percentage point (a 20-pt edge ≈ 0.6)
+    "corners": 0.15,        # sustained territorial pressure
+}
+
+# |score| must exceed this to lean off "even". Tuned so a lone one-shot-on-
+# goal edge with nothing else (score 1.0) stays "even" — a real lean needs
+# corroborating signal, which damps tick-to-tick flicker into LEAN-CROSS.
+LEAN_THRESHOLD: float = 1.0
+
+
+@dataclass(frozen=True)
+class LeanSignal:
+    """Deterministic read of which side the live stats favour."""
+
+    leaning_side: str   # "home" | "away" | "even"
+    score: float        # signed weighted sum; >0 home, <0 away
+    contributing: int   # metrics with both sides present (0 → forced "even")
+
+
+def compute_lean(stats: FixtureStatistics | None) -> LeanSignal:
+    """Compute the engine lean from normalized stats. Pure + deterministic.
+
+    Returns ``LeanSignal("even", 0.0, 0)`` when stats are absent or no
+    metric has both sides populated — the lean never guesses from nothing.
+    """
+    if stats is None:
+        return LeanSignal("even", 0.0, 0)
+
+    score = 0.0
+    contributing = 0
+    for field, weight in LEAN_WEIGHTS.items():
+        home_val = getattr(stats.home, field)
+        away_val = getattr(stats.away, field)
+        if home_val is None or away_val is None:
+            continue
+        score += weight * (home_val - away_val)
+        contributing += 1
+
+    if contributing == 0:
+        return LeanSignal("even", 0.0, 0)
+
+    if score > LEAN_THRESHOLD:
+        side = "home"
+    elif score < -LEAN_THRESHOLD:
+        side = "away"
+    else:
+        side = "even"
+    return LeanSignal(leaning_side=side, score=round(score, 3), contributing=contributing)
+
+
+def favoured_side(p_home_win: float, p_away_win: float) -> str:
+    """The live probability bar's favoured side (draw ignored for 'side')."""
+    if p_home_win > p_away_win:
+        return "home"
+    if p_away_win > p_home_win:
+        return "away"
+    return "even"
+
+
+def lean_agrees_with_prediction(leaning_side: str, fav_side: str) -> bool:
+    """Whether the stat lean agrees with the favourite.
+
+    An "even" lean never contradicts the favourite (no tension to surface).
+    A concrete lean agrees only when it matches the favoured side.
+    """
+    if leaning_side == "even":
+        return True
+    return leaning_side == fav_side

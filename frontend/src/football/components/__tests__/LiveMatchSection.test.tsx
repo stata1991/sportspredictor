@@ -244,6 +244,87 @@ describe('LiveMatchSection', () => {
     expect(screen.getByTestId('live-stats-pending')).toBeInTheDocument();
   });
 
+  test('renders the live note when present, absent when null', () => {
+    mockUseLivePolling.mockReturnValue({
+      data: {
+        ...STATS_DATA,
+        live_note: {
+          text: 'Brazil are turning the screw and Germany can not get out.',
+          trigger: 'goal',
+          leaning_side: 'home',
+          agrees_with_prediction: true,
+          elapsed: 67,
+        },
+      },
+      error: null,
+      isPolling: true,
+      lastUpdated: new Date(),
+      refetch: mockRefetch,
+    });
+    const { rerender } = render(<LiveMatchSection {...defaultProps} />);
+    expect(screen.getByTestId('live-note')).toBeInTheDocument();
+    expect(screen.getByTestId('live-note-text')).toHaveTextContent(
+      'turning the screw',
+    );
+
+    // No note yet (pre-trigger) → absent.
+    mockUseLivePolling.mockReturnValue({
+      data: { ...STATS_DATA, live_note: null },
+      error: null,
+      isPolling: true,
+      lastUpdated: new Date(),
+      refetch: mockRefetch,
+    });
+    rerender(<LiveMatchSection {...defaultProps} />);
+    expect(screen.queryByTestId('live-note')).not.toBeInTheDocument();
+  });
+
+  test('live note updates on the same poll tick as the score', () => {
+    mockUseLivePolling.mockReturnValue({
+      data: {
+        ...STATS_DATA,
+        live_note: {
+          text: 'A first goal for the hosts changes the complexion.',
+          trigger: 'goal',
+          leaning_side: 'home',
+          agrees_with_prediction: true,
+          elapsed: 40,
+        },
+      },
+      error: null,
+      isPolling: true,
+      lastUpdated: new Date(),
+      refetch: mockRefetch,
+    });
+    const { rerender } = render(<LiveMatchSection {...defaultProps} />);
+    expect(screen.getByTestId('live-note-meta')).toHaveTextContent("· 40'");
+
+    // Next tick: lean crosses; note + meta update together with the data.
+    mockUseLivePolling.mockReturnValue({
+      data: {
+        ...STATS_DATA,
+        live_note: {
+          text: 'Germany have wrested back control despite trailing.',
+          trigger: 'lean_cross',
+          leaning_side: 'away',
+          agrees_with_prediction: false,
+          elapsed: 58,
+        },
+      },
+      error: null,
+      isPolling: true,
+      lastUpdated: new Date(),
+      refetch: mockRefetch,
+    });
+    rerender(<LiveMatchSection {...defaultProps} />);
+    expect(screen.getByTestId('live-note-text')).toHaveTextContent(
+      'wrested back control',
+    );
+    expect(screen.getByTestId('live-note-meta')).toHaveTextContent(
+      'as the game shifts',
+    );
+  });
+
   test('stats refresh on the same poll tick as the score (single data source)', () => {
     // First tick: 2–1 with 58% possession.
     mockUseLivePolling.mockReturnValue({

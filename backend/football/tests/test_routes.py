@@ -524,6 +524,44 @@ class TestPredictLive:
         assert stats["away"]["shots_total"] == 6
         self.mock_client.get_statistics.assert_awaited_once_with(100)
 
+    @patch("backend.football.routes.maybe_generate_live_narration")
+    @patch("backend.football.routes.save_live_prediction")
+    @patch("backend.football.routes.get_cached_live_prediction")
+    @patch("backend.football.routes._get_engine")
+    async def test_live_includes_live_note_when_coordinator_returns_one(
+        self, mock_engine_fn, mock_cache_fn, mock_save_fn, mock_coord
+    ):
+        fx = _make_fixture(
+            status_short="2H", status_long="Second Half",
+            elapsed=67, home_goals=2, away_goals=1,
+        )
+        self.mock_client.get_fixture = AsyncMock(return_value=fx)
+        self.mock_client.get_statistics = AsyncMock(return_value=[])
+        mock_cache_fn.return_value = None
+        mock_engine = MagicMock()
+        mock_engine.model.predict_match.return_value = {
+            "lambda_home": 1.5, "lambda_away": 1.0, "confidence": "normal",
+        }
+        mock_engine_fn.return_value = mock_engine
+        mock_save_fn.return_value = MagicMock()
+        mock_coord.return_value = {
+            "text": "Brazil are turning the screw and Germany can't get out.",
+            "trigger": "goal",
+            "leaning_side": "home",
+            "agrees_with_prediction": True,
+        }
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/live/100")
+
+        assert resp.status_code == 200
+        note = resp.json()["live_note"]
+        assert note is not None
+        assert note["trigger"] == "goal"
+        assert "Brazil" in note["text"]
+
     async def test_statistics_not_fetched_for_pre_match(self):
         fx = _make_fixture(status_short="NS")
         self.mock_client.get_fixture = AsyncMock(return_value=fx)

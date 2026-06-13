@@ -359,6 +359,64 @@ async def get_cached_live_prediction(
     return row
 
 
+# ── Live narration read (STATS-B, append-only) ───────────────────────
+
+
+async def save_live_narration(
+    session: AsyncSession,
+    fixture_id: int,
+    payload: dict,
+    model_version: str = "live_note_v1",
+) -> Prediction:
+    """Persist one live in-play narration read (append-only).
+
+    Reuses the generic ``Prediction`` table with
+    ``prediction_type="live_narration"`` — no schema change. The payload
+    carries the narration text plus the trigger/lean state it was
+    generated against, so LEAN-CROSS can diff against the last read and
+    re-polls reuse it verbatim. ``made_at`` drives the min-interval floor.
+    """
+    row = Prediction(
+        fixture_id=fixture_id,
+        prediction_type="live_narration",
+        stage="live",
+        payload=payload,
+        model_version=model_version,
+    )
+    session.add(row)
+    await session.flush()
+
+    logger.info(
+        "Saved live narration for fixture %d (trigger=%s, lean=%s)",
+        fixture_id,
+        payload.get("trigger"),
+        payload.get("leaning_side"),
+    )
+    return row
+
+
+async def get_latest_live_narration(
+    session: AsyncSession,
+    fixture_id: int,
+) -> Prediction | None:
+    """Fetch the most recent live narration read for a fixture (no TTL).
+
+    Used both to diff trigger/lean state on each poll tick and to reuse
+    the persisted read verbatim between triggers.
+    """
+    stmt = (
+        select(Prediction)
+        .where(
+            Prediction.fixture_id == fixture_id,
+            Prediction.prediction_type == "live_narration",
+        )
+        .order_by(Prediction.made_at.desc())
+        .limit(1)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 # ── Prediction cache (stage-aware freshness) ─────────────────────────
 
 CACHE_MAX_AGE_SECONDS = 3600  # 1 hour

@@ -17,3 +17,15 @@ export interface FixtureStatistics {
   home: TeamMatchStatistics;
   away: TeamMatchStatistics;
 }
+
+// Event-driven live "why" narration (STATS-B). Null until the first
+// trigger (goal / red card / halftime / momentum shift) fires; persists
+// between triggers, updated on the same poll tick as score.
+export interface LiveNote {
+  text: string;
+  trigger: 'goal' | 'red_card' | 'halftime' | 'lean_cross';
+  leaning_side: 'home' | 'away' | 'even';
+  agrees_with_prediction: boolean;
+  elapsed?: number;
+  generated_at?: string;
+}
