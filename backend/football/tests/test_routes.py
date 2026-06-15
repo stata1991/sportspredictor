@@ -562,6 +562,34 @@ class TestPredictLive:
         assert note["trigger"] == "goal"
         assert "Brazil" in note["text"]
 
+    @patch("backend.football.routes.maybe_generate_live_narration")
+    @patch("backend.football.routes.get_latest_predictions_for_fixture")
+    async def test_ft_fixture_skips_live_stats_and_narration(
+        self, mock_latest, mock_coord
+    ):
+        # POLL-FIX-1 FT cascade: once the fixture reads FT, the live path
+        # must gate off — no stats fetch, no narration coordinator.
+        fx = _make_fixture(
+            status_short="FT", status_long="Match Finished",
+            elapsed=90, home_goals=2, away_goals=1,
+        )
+        self.mock_client.get_fixture = AsyncMock(return_value=fx)
+        self.mock_client.get_statistics = AsyncMock(return_value=[])
+        mock_latest.return_value = {}
+
+        async with AsyncClient(
+            transport=ASGITransport(app=_app), base_url="http://test"
+        ) as ac:
+            resp = await ac.get("/api/football/predict/live/100")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["stage"] == "completed"
+        self.mock_client.get_statistics.assert_not_called()
+        mock_coord.assert_not_called()
+        assert "live_note" not in body
+        assert "statistics" not in body
+
     async def test_statistics_not_fetched_for_pre_match(self):
         fx = _make_fixture(status_short="NS")
         self.mock_client.get_fixture = AsyncMock(return_value=fx)

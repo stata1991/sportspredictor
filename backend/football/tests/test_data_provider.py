@@ -393,7 +393,10 @@ async def test_get_coverage_extracts_season() -> None:
 import time as _time  # noqa: E402
 
 from backend.football.constants import ENDPOINT_TTLS  # noqa: E402
-from backend.football.data_provider import _fixtures_list_ttl  # noqa: E402
+from backend.football.data_provider import (  # noqa: E402
+    _fixture_detail_ttl,
+    _fixtures_list_ttl,
+)
 
 
 def _live_item(status: str = "2H", elapsed: int = 55, ts: int | None = None) -> dict:
@@ -490,3 +493,55 @@ def test_fixtures_list_ttl_any_live_fixture_shortens_whole_list() -> None:
         {"fixture": {"status": {"short": "1H"}, "timestamp": int(_time.time())}},  # one live
     ]
     assert _fixtures_list_ttl(items) == ENDPOINT_TTLS["fixtures_list_live"]
+
+
+# ── Live-detail freshness fix (POLL-FIX-1) ────────────────────────────
+
+
+def test_fixture_detail_ttl_short_when_live() -> None:
+    items = [{"fixture": {"status": {"short": "1H"}, "timestamp": int(_time.time())}}]
+    assert _fixture_detail_ttl(items) == ENDPOINT_TTLS["fixture_detail_live"]   # 15s
+
+
+def test_fixture_detail_ttl_short_when_imminent() -> None:
+    soon = int(_time.time()) + 120
+    items = [{"fixture": {"status": {"short": "NS"}, "timestamp": soon}}]
+    assert _fixture_detail_ttl(items) == ENDPOINT_TTLS["fixture_detail_live"]
+
+
+def test_fixture_detail_ttl_long_when_prematch() -> None:
+    far = int(_time.time()) + ENDPOINT_TTLS["fixture_detail_prematch"] + 7200
+    items = [{"fixture": {"status": {"short": "NS"}, "timestamp": far}}]
+    assert _fixture_detail_ttl(items) == ENDPOINT_TTLS["fixture_detail_prematch"]  # 300s
+
+
+def test_fixture_detail_ttl_long_when_finished() -> None:
+    # FT in the past → not live, not imminent → long (terminal, fine to cache).
+    items = [{"fixture": {"status": {"short": "FT"}, "timestamp": int(_time.time()) - 7200}}]
+    assert _fixture_detail_ttl(items) == ENDPOINT_TTLS["fixture_detail_prematch"]
+
+
+@respx.mock
+async def test_live_fixture_detail_not_frozen_on_300s_entry() -> None:
+    """A live fixture's detail must refresh on the short TTL, not be frozen
+    for 300s. We can't fast-forward the clock, so assert the write TTL the
+    resolver chooses for a live fixture is the 15s key, not 300s."""
+    captured: dict = {}
+    client, cache, _ = _fresh_client()
+
+    real_set = cache.set
+
+    def _spy_set(key, value, ttl):  # capture the FRESH-key TTL (not the :stale backup)
+        if "fixture:" in key and "fixtures" not in key and not key.endswith(":stale"):
+            captured["ttl"] = ttl
+        return real_set(key, value, ttl)
+
+    cache.set = _spy_set  # type: ignore[method-assign]
+    respx.get(f"{BASE_URL}/fixtures").mock(
+        return_value=httpx.Response(200, json=_wrap([_live_item("1H", 12)]), headers=_RATE_LIMIT_HEADERS),
+    )
+    async with client:
+        fx = await client.get_fixture(100)
+
+    assert fx is not None and fx.fixture.status.short == "1H"
+    assert captured.get("ttl") == ENDPOINT_TTLS["fixture_detail_live"]  # 15s, not 300s

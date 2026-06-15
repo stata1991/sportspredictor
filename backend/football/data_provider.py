@@ -58,18 +58,16 @@ _LIVE_STATUS_SHORT: frozenset[str] = frozenset(
 )
 
 
-def _fixtures_list_ttl(items: list[dict[str, Any]]) -> int:
-    """Live-aware TTL for the NON-live fixtures list (LIVETAB-5).
+def _live_aware_ttl(
+    items: list[dict[str, Any]], *, short_ttl: int, long_ttl: int
+) -> int:
+    """Pick the short TTL when the data is volatile, else the long TTL.
 
-    Returns the short live TTL when the schedule is volatile — any fixture
-    in-play, OR kicking off within the long-TTL window (so a freshly-written
-    long entry can't swallow a kickoff that lands before it expires).
-    Otherwise the long schedule TTL. This keeps the Schedule tab fresh
-    during and just before matches without refetching the static schedule
-    overnight. One shared key, so the short-TTL refetches are trivial.
+    Volatile = any fixture in-play, OR kicking off within the long-TTL
+    window (so a freshly-written long entry can't swallow a kickoff that
+    lands before it expires). Shared by the fixtures list (LIVETAB-5) and
+    the single-fixture detail (POLL-FIX-1) so they can't drift apart.
     """
-    short_ttl = ENDPOINT_TTLS["fixtures_list_live"]
-    long_ttl = ENDPOINT_TTLS["fixtures_list"]
     now = time.time()
     for item in items:
         fixture = item.get("fixture") or {}
@@ -77,11 +75,39 @@ def _fixtures_list_ttl(items: list[dict[str, Any]]) -> int:
         if status in _LIVE_STATUS_SHORT:
             return short_ttl
         ts = fixture.get("timestamp")
-        # Kicks off within the window we'd otherwise cache for → don't cache
-        # long, or the kickoff would go unseen until the entry expires.
         if isinstance(ts, (int, float)) and 0 <= ts - now <= long_ttl:
             return short_ttl
     return long_ttl
+
+
+def _fixtures_list_ttl(items: list[dict[str, Any]]) -> int:
+    """Live-aware TTL for the NON-live fixtures list (LIVETAB-5).
+
+    Short while the schedule is volatile (a match live or imminent), long
+    when genuinely idle — keeps the Schedule tab fresh during/around matches
+    without refetching the static schedule overnight.
+    """
+    return _live_aware_ttl(
+        items,
+        short_ttl=ENDPOINT_TTLS["fixtures_list_live"],
+        long_ttl=ENDPOINT_TTLS["fixtures_list"],
+    )
+
+
+def _fixture_detail_ttl(items: list[dict[str, Any]]) -> int:
+    """Live-aware TTL for the single-fixture detail (POLL-FIX-1).
+
+    Wires the previously-dead ``fixture_detail_live`` (15s) to its intended
+    use: a live fixture's detail must stay fresh (score/minute, and the
+    live→FT transition that drives /predict/live), not be frozen for the
+    300s ``fixture_detail_prematch`` TTL. Short when the fixture is live or
+    imminent, long otherwise.
+    """
+    return _live_aware_ttl(
+        items,
+        short_ttl=ENDPOINT_TTLS["fixture_detail_live"],
+        long_ttl=ENDPOINT_TTLS["fixture_detail_prematch"],
+    )
 
 
 class APIFootballClient:
@@ -451,12 +477,22 @@ class APIFootballClient:
         return [AFFixture.model_validate(item) for item in items]
 
     async def get_fixture(self, fixture_id: int) -> AFFixture | None:
-        """Single fixture by ID.  Returns None if not found."""
+        """Single fixture by ID.  Returns None if not found.
+
+        Live-aware TTL (POLL-FIX-1): a live (or imminent) fixture is cached
+        for the short ``fixture_detail_live`` (15s), everything else for
+        ``fixture_detail_prematch`` (300s). The resolver reads the
+        just-fetched status, so there is no chicken-and-egg — the TTL is
+        chosen on the write, after the response is in hand. This keeps the
+        live match detail (which feeds /predict/live) fresh and makes a real
+        FT visible within ~15s instead of up to 5 minutes.
+        """
         items = await self._request(
             "/fixtures",
             {"id": fixture_id},
             cache_method="fixture",
             ttl=ENDPOINT_TTLS["fixture_detail_prematch"],
+            ttl_resolver=_fixture_detail_ttl,
         )
         if not items:
             return None
