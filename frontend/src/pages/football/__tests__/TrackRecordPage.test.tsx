@@ -29,7 +29,7 @@ describe('TrackRecordPage', () => {
     expect(screen.getByTestId('loading-state')).toBeInTheDocument();
   });
 
-  test('headline math is correct from the payload', () => {
+  test('headline math is correct from the payload (all decisive)', () => {
     set([
       receipt({ fixture_id: 1, winner_correct: true, goals_correct: true }),
       receipt({ fixture_id: 2, winner_correct: true, goals_correct: false }),
@@ -39,8 +39,65 @@ describe('TrackRecordPage', () => {
     render(<TrackRecordPage />);
 
     const headline = screen.getByTestId('headline');
-    expect(headline).toHaveTextContent('Winners called right: 2 of 3 (67%)');
+    expect(headline).toHaveTextContent('Winners called right: 2 of 3 decisive matches (67%)');
     expect(headline).toHaveTextContent('Goals calls: 2 of 3');
+    // No draws → no draw line.
+    expect(screen.queryByTestId('draw-line')).not.toBeInTheDocument();
+  });
+
+  test('draws are excluded from the headline denominator and own a separate line', () => {
+    // 15 decisive (13 correct) + 9 draws (all misses, as a real model produces)
+    // → headline must read 13 of 15 decisive (87%), NOT 13 of 24.
+    const decisive = Array.from({ length: 15 }, (_, i) =>
+      receipt({ fixture_id: 100 + i, winner_correct: i < 13,
+                winner_pick: 'Spain', winner_actual: i < 13 ? 'Spain' : 'Cape Verde' }),
+    );
+    const draws = Array.from({ length: 9 }, (_, i) =>
+      receipt({ fixture_id: 200 + i, final_score: '1-1',
+                winner_pick: 'Spain', winner_actual: 'Draw', winner_correct: false,
+                goals_correct: true }),
+    );
+    set([...decisive, ...draws]);
+    render(<TrackRecordPage />);
+
+    const headline = screen.getByTestId('headline');
+    expect(headline).toHaveTextContent('Winners called right: 13 of 15 decisive matches (87%)');
+    expect(screen.getByTestId('draw-line')).toHaveTextContent(
+      '9 matches drawn — a draw is rarely the top call for any model.',
+    );
+    // Every match still renders — draws are owned, not hidden.
+    expect(screen.getAllByTestId('match-receipt')).toHaveLength(24);
+  });
+
+  test('a single decisive match reads "1 decisive match" (singular)', () => {
+    set([receipt({ winner_correct: true })]);
+    render(<TrackRecordPage />);
+    expect(screen.getByTestId('headline')).toHaveTextContent(
+      'Winners called right: 1 of 1 decisive match (100%)',
+    );
+  });
+
+  test('a single drawn match reads "1 match drawn"', () => {
+    set([
+      receipt({ fixture_id: 1, winner_correct: true }),
+      receipt({ fixture_id: 2, final_score: '1-1', winner_actual: 'Draw',
+                winner_correct: false }),
+    ]);
+    render(<TrackRecordPage />);
+    expect(screen.getByTestId('draw-line')).toHaveTextContent('1 match drawn');
+  });
+
+  test('drawn match still renders its receipt with the drawn outcome', () => {
+    set([
+      receipt({ fixture_id: 2, home_team: 'Brazil', away_team: 'Morocco',
+                final_score: '1-1', winner_pick: 'Brazil', winner_actual: 'Draw',
+                winner_correct: false, goals_correct: true }),
+    ]);
+    render(<TrackRecordPage />);
+    const card = screen.getByTestId('match-receipt');
+    expect(card).toHaveTextContent('Called: Brazil');
+    expect(within(card).getByTestId('miss-mark')).toBeInTheDocument();
+    expect(card).toHaveTextContent('(drawn)');
   });
 
   test('renders hit and miss markers', () => {
@@ -80,7 +137,7 @@ describe('TrackRecordPage', () => {
     // The Warm-up chip is gone entirely (dead UI removed).
     expect(screen.queryByTestId('warmup-chip')).not.toBeInTheDocument();
     // Headline counts only the WC match.
-    expect(screen.getByTestId('headline')).toHaveTextContent('Winners called right: 1 of 1');
+    expect(screen.getByTestId('headline')).toHaveTextContent('Winners called right: 1 of 1 decisive match');
     expect(screen.getByTestId('headline')).toHaveTextContent('Goals calls: 1 of 1');
   });
 
@@ -94,13 +151,20 @@ describe('TrackRecordPage', () => {
     expect(screen.queryByTestId('track-record-content')).not.toBeInTheDocument();
   });
 
-  test('no statistical jargon appears anywhere on the page', () => {
-    set([receipt(), receipt({ fixture_id: 2, winner_correct: false, goals_correct: false })]);
+  test('no statistical jargon appears anywhere on the page (incl. the draw line)', () => {
+    set([
+      receipt(),
+      receipt({ fixture_id: 2, winner_correct: false, goals_correct: false }),
+      // include a draw so the draw line is in the DOM and gets scanned too
+      receipt({ fixture_id: 3, final_score: '1-1', winner_actual: 'Draw',
+                winner_correct: false }),
+    ]);
     const { container } = render(<TrackRecordPage />);
     const text = container.textContent || '';
     for (const forbidden of [
       'Brier', 'log loss', 'Log Loss', 'first_to_score', 'ht_score',
       'all_time', 'last_7d', 'last_30d',
+      'the model', 'xG', 'expected goals', 'probability',  // narration-forbidden vocab
     ]) {
       expect(text).not.toContain(forbidden);
     }

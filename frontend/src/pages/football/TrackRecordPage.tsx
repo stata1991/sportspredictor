@@ -113,13 +113,27 @@ const TrackRecordContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
 
   const headline = useMemo(() => {
     const winnerEval = wcMatches.filter((m) => m.winner_correct !== null);
-    const winnerHits = winnerEval.filter((m) => m.winner_correct === true).length;
+    // Headline accuracy is DECISIVE matches only. A draw is structurally
+    // unwinnable for the top pick — a draw is almost never any model's
+    // single most-likely outcome — so lumping draws into the denominator
+    // understates the real skill. Draws aren't hidden: they keep their own
+    // honest line and still render in the list below.
+    const decisive = winnerEval.filter((m) => m.winner_actual !== 'Draw');
+    const decisiveHits = decisive.filter((m) => m.winner_correct === true).length;
+    const drawnCount = winnerEval.length - decisive.length;
     const goalsEval = wcMatches.filter((m) => m.goals_correct !== null);
     const goalsHits = goalsEval.filter((m) => m.goals_correct === true).length;
-    const pct = winnerEval.length
-      ? Math.round((winnerHits / winnerEval.length) * 100)
+    const pct = decisive.length
+      ? Math.round((decisiveHits / decisive.length) * 100)
       : 0;
-    return { winnerHits, winnerTotal: winnerEval.length, pct, goalsHits, goalsTotal: goalsEval.length };
+    return {
+      decisiveHits,
+      decisiveTotal: decisive.length,
+      pct,
+      drawnCount,
+      goalsHits,
+      goalsTotal: goalsEval.length,
+    };
   }, [wcMatches]);
 
   if (loading) {
@@ -167,15 +181,27 @@ const TrackRecordContent: React.FC<{ onRetry: () => void }> = ({ onRetry }) => {
 
   return (
     <Box data-testid="track-record-content">
-      {/* Headline */}
+      {/* Headline — decisive accuracy leads; draws own their own line */}
       <Box data-testid="headline" sx={{ mb: 3 }}>
         <Typography
           variant="h5"
           sx={{ fontWeight: 800, color: colors.textPrimary }}
         >
-          Winners called right: {headline.winnerHits} of {headline.winnerTotal}
-          {headline.winnerTotal > 0 && ` (${headline.pct}%)`}
+          Winners called right: {headline.decisiveHits} of {headline.decisiveTotal}{' '}
+          decisive {headline.decisiveTotal === 1 ? 'match' : 'matches'}
+          {headline.decisiveTotal > 0 && ` (${headline.pct}%)`}
         </Typography>
+        {headline.drawnCount > 0 && (
+          <Typography
+            data-testid="draw-line"
+            variant="body2"
+            sx={{ color: colors.labelText, mt: 0.5 }}
+          >
+            {headline.drawnCount}{' '}
+            {headline.drawnCount === 1 ? 'match' : 'matches'} drawn — a draw is
+            rarely the top call for any model.
+          </Typography>
+        )}
         <Typography variant="body2" sx={{ color: colors.labelText, mt: 0.5 }}>
           Goals calls: {headline.goalsHits} of {headline.goalsTotal}
         </Typography>
