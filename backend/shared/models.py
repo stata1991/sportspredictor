@@ -79,6 +79,13 @@ class Outcome(Base):
     # API-Football league.round, captured at ingest. Powers the Track Record
     # round badge and (soon) knockout evaluation. Nullable for old rows.
     round: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Knockout advance capture (EVAL-2). For a knockout fixture, the NAME of
+    # the team that ADVANCED and how the tie was decided. NULL for group-stage
+    # rows — grading then falls back to the 90-min result. ``advancer_team``
+    # always equals home_team or away_team.
+    advancer_team: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # regulation | extra_time | penalties
+    decided_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     kickoff_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False
     )

@@ -198,6 +198,8 @@ async def save_outcome(
     ht_away: int | None = None,
     first_scorer_team: str | None = None,
     round: str | None = None,
+    advancer_team: str | None = None,
+    decided_by: str | None = None,
     kickoff_at: datetime,
 ) -> None:
     """Upsert a match outcome.
@@ -212,7 +214,9 @@ async def save_outcome(
         Active async session (caller manages commit/rollback).
     fixture_id … kickoff_at:
         Outcome fields.  ``ht_home``/``ht_away`` are nullable for
-        matches where HT data is unavailable.
+        matches where HT data is unavailable. ``advancer_team`` /
+        ``decided_by`` are set only for knockout fixtures (EVAL-2);
+        group-stage rows leave them ``None``.
     """
     insert_values = dict(
         fixture_id=fixture_id,
@@ -224,6 +228,8 @@ async def save_outcome(
         ht_away=ht_away,
         first_scorer_team=first_scorer_team,
         round=round,
+        advancer_team=advancer_team,
+        decided_by=decided_by,
         kickoff_at=kickoff_at,
     )
 

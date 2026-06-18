@@ -11,6 +11,7 @@ function receipt(over: Partial<MatchReceipt> = {}): MatchReceipt {
   return {
     fixture_id: 1, kickoff: '2026-06-11T19:00:00+00:00', round: 'Group Stage - 1',
     home_team: 'Mexico', away_team: 'South Africa', final_score: '2-0',
+    decided_by: null,
     winner_pick: 'Mexico', winner_actual: 'Mexico', winner_correct: true,
     goals_pick: 'Under 2.5', goals_actual: 2, goals_correct: true,
     is_friendly: false, ...over,
@@ -184,5 +185,78 @@ describe('TrackRecordPage', () => {
     render(<TrackRecordPage />);
     expect(screen.getByTestId('error-state')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  // ── Knockout advance-based receipts (EVAL-2) ──────────────────────
+
+  test('KO penalties hit: "advanced on penalties" + pens score tag, no "Draw"', () => {
+    set([
+      receipt({
+        fixture_id: 1, home_team: 'Argentina', away_team: 'France',
+        final_score: '2-2', round: 'Final', decided_by: 'penalties',
+        winner_pick: 'Argentina', winner_actual: 'Argentina', winner_correct: true,
+      }),
+    ]);
+    render(<TrackRecordPage />);
+    const called = screen.getByTestId('called-line');
+    expect(called).toHaveTextContent('Called: Argentina');
+    expect(called).toHaveTextContent('(advanced on penalties)');
+    expect(within(called).getByTestId('hit-mark')).toBeInTheDocument();
+    expect(screen.getByTestId('score-tag')).toHaveTextContent('pens');
+    expect(screen.getByTestId('match-receipt').textContent).not.toContain('Draw');
+    expect(screen.getByTestId('match-receipt').textContent).not.toContain('drawn');
+  });
+
+  test('KO penalties miss names the advancer, not a draw', () => {
+    set([
+      receipt({
+        fixture_id: 1, home_team: 'Argentina', away_team: 'France',
+        final_score: '2-2', round: 'Final', decided_by: 'penalties',
+        winner_pick: 'France', winner_actual: 'Argentina', winner_correct: false,
+      }),
+    ]);
+    render(<TrackRecordPage />);
+    const called = screen.getByTestId('called-line');
+    expect(called).toHaveTextContent('Called: France');
+    expect(called).toHaveTextContent('(Argentina advanced on penalties)');
+    expect(called.textContent).not.toContain('drawn');
+  });
+
+  test('KO extra time: "won in extra time" + ET tag', () => {
+    set([
+      receipt({
+        fixture_id: 1, final_score: '1-1', round: 'Semi-finals',
+        decided_by: 'extra_time', winner_pick: 'Mexico',
+        winner_actual: 'Mexico', winner_correct: true,
+      }),
+    ]);
+    render(<TrackRecordPage />);
+    expect(screen.getByTestId('called-line')).toHaveTextContent('(won in extra time)');
+    expect(screen.getByTestId('score-tag')).toHaveTextContent('ET');
+  });
+
+  test('KO regulation: "won", no score tag', () => {
+    set([
+      receipt({
+        fixture_id: 1, final_score: '2-1', round: 'Round of 16',
+        decided_by: 'regulation', winner_pick: 'Mexico',
+        winner_actual: 'Mexico', winner_correct: true,
+      }),
+    ]);
+    render(<TrackRecordPage />);
+    expect(screen.getByTestId('called-line')).toHaveTextContent('(won)');
+    expect(screen.queryByTestId('score-tag')).not.toBeInTheDocument();
+  });
+
+  test('group-stage card unchanged: no decided_by tag, draw still shown', () => {
+    set([
+      receipt({ fixture_id: 1, winner_correct: true }),  // hit, no parenthetical
+      receipt({ fixture_id: 2, final_score: '1-1', winner_pick: 'Mexico',
+                winner_actual: 'Draw', winner_correct: false }),
+    ]);
+    render(<TrackRecordPage />);
+    expect(screen.queryByTestId('score-tag')).not.toBeInTheDocument();
+    const cards = screen.getAllByTestId('called-line');
+    expect(cards[1]).toHaveTextContent('(drawn)');  // group draw unchanged
   });
 });

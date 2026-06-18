@@ -27,10 +27,39 @@ const MissMark: React.FC = () => (
 
 const goalsWord = (n: number) => `${n} goal${n === 1 ? '' : 's'}`;
 
+// How a knockout advancer went through, for the called line.
+const advanceVerb = (decidedBy: MatchReceipt['decided_by']): string =>
+  decidedBy === 'penalties'
+    ? 'advanced on penalties'
+    : decidedBy === 'extra_time'
+    ? 'won in extra time'
+    : 'won';
+
+// Short tag appended to the score for a knockout decided past 90'.
+const scoreTag = (decidedBy: MatchReceipt['decided_by']): string | null =>
+  decidedBy === 'penalties' ? 'pens' : decidedBy === 'extra_time' ? 'ET' : null;
+
+// The parenthetical on the called line.
+// - Knockout (decided_by set): always show how the advancer went through —
+//   never "drawn" (a knockout cannot draw).
+// - Group stage: only on a miss — "X won" / "drawn".
+const calledParenthetical = (m: MatchReceipt): string | null => {
+  if (m.decided_by) {
+    const verb = advanceVerb(m.decided_by);
+    return m.winner_correct ? verb : `${m.winner_actual} ${verb}`;
+  }
+  if (!m.winner_correct && m.winner_actual) {
+    return m.winner_actual === 'Draw' ? 'drawn' : `${m.winner_actual} won`;
+  }
+  return null;
+};
+
 // ── One match receipt card ────────────────────────────────────────────
 
 const MatchCard: React.FC<{ m: MatchReceipt }> = ({ m }) => {
   const roundLabel = roundShortLabel(m.round);
+  const tag = scoreTag(m.decided_by);
+  const parenthetical = calledParenthetical(m);
 
   return (
     <Card
@@ -55,12 +84,21 @@ const MatchCard: React.FC<{ m: MatchReceipt }> = ({ m }) => {
         </Box>
       )}
 
-      {/* Teams + final score */}
+      {/* Teams + final score (regulation; KO adds an ET/pens tag) */}
       <Typography
         variant="subtitle1"
         sx={{ fontWeight: 700, color: colors.textPrimary, mb: 0.75 }}
       >
-        {m.home_team} <Box component="span" sx={{ color: colors.labelText }}>{m.final_score}</Box> {m.away_team}
+        {m.home_team}{' '}
+        <Box component="span" sx={{ color: colors.labelText }}>
+          {m.final_score}
+          {tag && (
+            <Box component="span" data-testid="score-tag" sx={{ ml: 0.5 }}>
+              · {tag}
+            </Box>
+          )}
+        </Box>{' '}
+        {m.away_team}
       </Typography>
 
       {/* Called line */}
@@ -72,9 +110,9 @@ const MatchCard: React.FC<{ m: MatchReceipt }> = ({ m }) => {
         >
           Called: {m.winner_pick}
           {m.winner_correct ? <HitMark /> : <MissMark />}
-          {!m.winner_correct && m.winner_actual && (
+          {parenthetical && (
             <Box component="span" sx={{ color: colors.labelText, ml: 0.75 }}>
-              ({m.winner_actual === 'Draw' ? 'drawn' : `${m.winner_actual} won`})
+              ({parenthetical})
             </Box>
           )}
         </Typography>

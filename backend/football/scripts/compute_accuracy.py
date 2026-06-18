@@ -152,7 +152,17 @@ def _compute_winner_metrics(
             float(payload["p_away_win"]),
         ]
 
-        if outcome.ft_home > outcome.ft_away:
+        advancer = getattr(outcome, "advancer_team", None)
+        if advancer is not None:
+            # KNOCKOUT (EVAL-2): grade against who ADVANCED, not the 90-min
+            # score. A knockout level at 90' that went to ET/pens must NOT be
+            # graded a draw. KO predictions are binary (KO-1) — no draw mass —
+            # so the draw slot is always 0; the advancer side is the actual.
+            if advancer == outcome.home_team:
+                actual = [1.0, 0.0, 0.0]
+            else:  # advancer is the away team
+                actual = [0.0, 0.0, 1.0]
+        elif outcome.ft_home > outcome.ft_away:
             actual = [1.0, 0.0, 0.0]
         elif outcome.ft_home == outcome.ft_away:
             actual = [0.0, 1.0, 0.0]

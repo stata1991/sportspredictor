@@ -372,3 +372,57 @@ class TestRunIntegration:
             result = await _run()
 
         assert result == 0
+
+
+# ── Knockout advance-based winner grading (EVAL-2) ───────────────────
+
+
+def _ko_out(advancer_team, *, ft_home, ft_away, home="Argentina", away="France"):
+    o = _out(ft_home=ft_home, ft_away=ft_away, home_team=home, away_team=away)
+    o.advancer_team = advancer_team
+    return o
+
+
+class TestKnockoutWinnerGrading:
+    def test_pens_not_graded_as_draw_HEADLINE(self):
+        # THE EVAL-2 bug: 1-1 at 90', won on penalties by the home favourite.
+        # Old code graded the level score a DRAW → the home pick was "wrong".
+        # Now it grades against the advancer → a correct call.
+        p = _pred(payload={"p_home_win": 0.7, "p_draw": 0.0, "p_away_win": 0.3})
+        o = _ko_out("Argentina", ft_home=1, ft_away=1)  # level at 90, Argentina advanced
+        m = _compute_winner_metrics([(p, o)])
+        assert m.top_pick_hit_rate == 1.0   # NOT a draw, NOT a miss
+        # Brier is graded vs [home=1, draw=0, away=0], not vs the draw slot.
+        expected = (0.7 - 1) ** 2 + (0.0 - 0) ** 2 + (0.3 - 0) ** 2
+        assert abs(m.brier_score - expected) < 1e-10
+
+    def test_wrong_side_advanced_is_a_miss(self):
+        # Favoured away, but home advanced on pens → miss (not a draw).
+        p = _pred(payload={"p_home_win": 0.3, "p_draw": 0.0, "p_away_win": 0.7})
+        o = _ko_out("Argentina", ft_home=1, ft_away=1)  # home (Argentina) advanced
+        m = _compute_winner_metrics([(p, o)])
+        assert m.top_pick_hit_rate == 0.0
+
+    def test_away_advanced_graded_correctly(self):
+        p = _pred(payload={"p_home_win": 0.3, "p_draw": 0.0, "p_away_win": 0.7})
+        o = _ko_out("France", ft_home=2, ft_away=2)  # away (France) advanced
+        m = _compute_winner_metrics([(p, o)])
+        assert m.top_pick_hit_rate == 1.0
+
+    def test_group_match_unchanged_draw_still_valid(self):
+        # No advancer → group path: 1-1 is a draw, home pick misses.
+        p = _pred(payload={"p_home_win": 0.7, "p_draw": 0.2, "p_away_win": 0.1})
+        o = _out(ft_home=1, ft_away=1)  # group draw, advancer_team is None
+        m = _compute_winner_metrics([(p, o)])
+        assert m.top_pick_hit_rate == 0.0   # draw was the actual, home pick wrong
+
+    def test_total_goals_on_KO_uses_regulation_not_cumulative(self):
+        # The Final: 90-min 2-2 = 4 goals (Over). Graded on regulation, not the
+        # 3-3 cumulative and not incl. penalties — both happen to be Over, so
+        # use a distinguishing case: 1-1 at 90 (2 goals, UNDER) on a KO that
+        # advanced — Total Goals must read UNDER (regulation), not Over.
+        p = _pred(prediction_type="total_goals",
+                  payload={"over_2_5": 0.3, "under_2_5": 0.7})
+        o = _ko_out("Argentina", ft_home=1, ft_away=1)  # 2 goals at 90
+        m = _compute_total_goals_metrics([(p, o)])
+        assert m.top_pick_hit_rate == 1.0   # under is correct on regulation

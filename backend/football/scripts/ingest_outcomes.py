@@ -26,9 +26,11 @@ import sys
 from sqlalchemy import select
 
 from backend.cache import CacheClient
+from backend.football._perf import _emit
 from backend.football.data_provider import APIFootballClient
 from backend.football.persistence import save_outcome
-from backend.football.schemas import AFEvent
+from backend.football.predictions.derivations import is_knockout_round
+from backend.football.schemas import AFEvent, AFFixture
 from backend.shared.async_singleflight import AsyncSingleflight
 from backend.shared.db import get_db_session
 from backend.shared.models import Outcome, Prediction
@@ -58,6 +60,78 @@ def _first_scorer_team(events: list[AFEvent]) -> str | None:
         return None
     goals.sort(key=lambda e: ((e.time.elapsed or 0), (e.time.extra or 0)))
     return goals[0].team.name
+
+
+# ── Knockout advancer (EVAL-2) ───────────────────────────────────────
+
+
+def _decided_by(fixture: AFFixture) -> str:
+    """How a knockout tie was decided, from the score fields.
+
+    penalty present → ``penalties`` (a pens match also carries an ET score,
+    so penalty is checked FIRST); else a non-level ET score → ``extra_time``;
+    else ``regulation``.
+    """
+    s = fixture.score
+    if s.penalty.home is not None and s.penalty.away is not None:
+        return "penalties"
+    if (
+        s.extratime.home is not None
+        and s.extratime.away is not None
+        and s.extratime.home != s.extratime.away
+    ):
+        return "extra_time"
+    return "regulation"
+
+
+def _knockout_advancer(fixture: AFFixture) -> tuple[str | None, str]:
+    """Return ``(advancing_team_name, decided_by)`` for a knockout fixture.
+
+    The advancer is resolved by a fallback chain (EVAL-2-PRE):
+      1. ``teams.{home,away}.winner`` boolean — authoritative; it reflects
+         the shootout / extra-time winner, not the 90-min scoreline.
+      2. penalty score (higher advances) — for pens when winner is missing.
+      3. 120-min cumulative = fulltime + extratime (higher advances).
+      4. fulltime alone (higher advances).
+    Returns ``(None, decided_by)`` when advancement can't be determined
+    (all level, no penalty, no winner) — the caller emits a tripwire and
+    leaves it null rather than guessing.
+    """
+    home = fixture.teams.home
+    away = fixture.teams.away
+    s = fixture.score
+    decided_by = _decided_by(fixture)
+
+    # 1. winner boolean (exactly one True).
+    if home.winner is True and away.winner is not True:
+        return home.name, decided_by
+    if away.winner is True and home.winner is not True:
+        return away.name, decided_by
+
+    # 2. penalty shootout.
+    if (
+        s.penalty.home is not None
+        and s.penalty.away is not None
+        and s.penalty.home != s.penalty.away
+    ):
+        return (home.name if s.penalty.home > s.penalty.away else away.name), decided_by
+
+    # 3. 120-min cumulative (regulation + extra time).
+    cum_home = (s.fulltime.home or 0) + (s.extratime.home or 0)
+    cum_away = (s.fulltime.away or 0) + (s.extratime.away or 0)
+    if cum_home != cum_away:
+        return (home.name if cum_home > cum_away else away.name), decided_by
+
+    # 4. fulltime (regulation) margin.
+    if (
+        s.fulltime.home is not None
+        and s.fulltime.away is not None
+        and s.fulltime.home != s.fulltime.away
+    ):
+        return (home.name if s.fulltime.home > s.fulltime.away else away.name), decided_by
+
+    # Undeterminable — do NOT guess.
+    return None, decided_by
 
 
 # ── Core logic ───────────────────────────────────────────────────────
@@ -173,6 +247,21 @@ async def run_ingest() -> dict:
                 ht_home = fixture.score.halftime.home
                 ht_away = fixture.score.halftime.away
 
+                # ── Knockout advancer (EVAL-2) ──────────────
+                # Knockout fixtures grade against the team that ADVANCED, not
+                # the 90-min result. Group fixtures skip this entirely
+                # (advancer_team stays None → grading uses the 90-min W/D/L).
+                advancer_team = None
+                decided_by = None
+                if is_knockout_round(fixture.league.round):
+                    advancer_team, decided_by = _knockout_advancer(fixture)
+                    if advancer_team is None:
+                        # Couldn't tell who advanced — never guess; flag it.
+                        _emit({
+                            "event": "knockout_advancer_undetermined",
+                            "fixture_id": fixture_id,
+                        })
+
                 # ── First scorer (best-effort) ──────────────
                 # Events power first_to_score evaluation. A failure here must
                 # not block saving the outcome — fall back to None.
@@ -200,6 +289,8 @@ async def run_ingest() -> dict:
                         ht_away=ht_away,
                         first_scorer_team=first_scorer_team,
                         round=fixture.league.round,
+                        advancer_team=advancer_team,
+                        decided_by=decided_by,
                         kickoff_at=fixture.fixture.date,
                     )
                     await session.commit()

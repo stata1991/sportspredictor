@@ -23,9 +23,11 @@ export interface MatchReceipt {
   round: string | null;
   home_team: string;
   away_team: string;
-  final_score: string; // "2-0"
+  final_score: string; // "2-0" — regulation (90-min) score
+  // Knockout only (EVAL-2): how the tie was decided. null for group stage.
+  decided_by: 'regulation' | 'extra_time' | 'penalties' | null;
   winner_pick: string | null;
-  winner_actual: string | null;
+  winner_actual: string | null; // KO: the team that ADVANCED (never "Draw")
   winner_correct: boolean | null;
   goals_pick: string | null; // "Over 2.5" | "Under 2.5"
   goals_actual: number;

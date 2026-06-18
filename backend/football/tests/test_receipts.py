@@ -99,3 +99,59 @@ class TestMeta:
         assert r["winner_pick"] is None and r["winner_correct"] is None
         assert r["goals_pick"] is None and r["goals_correct"] is None
         assert r["goals_actual"] == 2  # still derivable from the score
+
+
+# ── Knockout advance-based receipts (EVAL-2) ─────────────────────────
+
+
+def _ko_outcome(ft_home, ft_away, advancer_team, decided_by, *,
+                home="Argentina", away="France", rnd="Final", fid=99):
+    o = _outcome(ft_home, ft_away, home=home, away=away, rnd=rnd, fid=fid)
+    o.advancer_team = advancer_team
+    o.decided_by = decided_by
+    return o
+
+
+class TestKnockoutReceipt:
+    def test_pens_advancer_is_actual_not_draw(self):
+        # 2-2 at 90', Argentina advanced on pens. Picked Argentina → correct,
+        # and the actual is "Argentina", NEVER "Draw".
+        o = _ko_outcome(2, 2, "Argentina", "penalties")
+        r = build_match_receipt(o, WINNER(0.7, 0.0, 0.3), None)
+        assert r["winner_pick"] == "Argentina"
+        assert r["winner_actual"] == "Argentina"
+        assert r["winner_actual"] != "Draw"
+        assert r["winner_correct"] is True
+        assert r["decided_by"] == "penalties"
+
+    def test_pens_wrong_pick_is_miss_not_draw(self):
+        o = _ko_outcome(2, 2, "Argentina", "penalties")
+        r = build_match_receipt(o, WINNER(0.3, 0.0, 0.7), None)  # favoured France
+        assert r["winner_pick"] == "France"
+        assert r["winner_actual"] == "Argentina"  # the advancer, not "Draw"
+        assert r["winner_correct"] is False
+
+    def test_extra_time_decided_by(self):
+        o = _ko_outcome(1, 1, "Argentina", "extra_time")
+        r = build_match_receipt(o, WINNER(0.6, 0.0, 0.4), None)
+        assert r["winner_correct"] is True
+        assert r["decided_by"] == "extra_time"
+
+    def test_regulation_ko_decided_by(self):
+        o = _ko_outcome(2, 1, "Argentina", "regulation")
+        r = build_match_receipt(o, WINNER(0.6, 0.0, 0.4), None)
+        assert r["winner_actual"] == "Argentina"
+        assert r["decided_by"] == "regulation"
+
+    def test_group_receipt_has_null_decided_by(self):
+        # Group rows (no advancer) keep the 90-min W/D/L and decided_by=None.
+        r = build_match_receipt(_outcome(1, 1), WINNER(0.6, 0.25, 0.15), None)
+        assert r["winner_actual"] == "Draw"   # group draw unchanged
+        assert r["decided_by"] is None
+
+    def test_total_goals_on_ko_is_regulation(self):
+        # KO 2-2 at 90 = 4 goals (regulation) → Over correct, ignoring ET/pens.
+        o = _ko_outcome(2, 2, "Argentina", "penalties")
+        r = build_match_receipt(o, WINNER(0.7, 0.0, 0.3), GOALS(0.8, 0.2))
+        assert r["goals_actual"] == 4
+        assert r["goals_correct"] is True

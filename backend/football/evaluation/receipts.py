@@ -53,6 +53,11 @@ def build_match_receipt(
     """Assemble one receipt from an outcome + its latest prediction payloads."""
     home, away = outcome.home_team, outcome.away_team
     total_goals = outcome.ft_home + outcome.ft_away
+    # Knockout advance capture (EVAL-2). When present, the winner pick is
+    # graded against who ADVANCED, never the 90-min "Draw". Group rows leave
+    # these None and grade on the regulation result as before.
+    advancer = getattr(outcome, "advancer_team", None)
+    decided_by = getattr(outcome, "decided_by", None)
 
     receipt: dict[str, Any] = {
         "fixture_id": outcome.fixture_id,
@@ -61,13 +66,19 @@ def build_match_receipt(
         "home_team": home,
         "away_team": away,
         "final_score": f"{outcome.ft_home}-{outcome.ft_away}",
+        "decided_by": decided_by,  # null (group) | regulation | extra_time | penalties
         "is_friendly": is_friendly(outcome.kickoff_at),
     }
 
     # ── Winner ──
     if winner_payload is not None:
         pick = _winner_pick(winner_payload, home, away)
-        actual = _winner_actual(outcome.ft_home, outcome.ft_away, home, away)
+        # Knockout → the team that advanced; group → the 90-min W/D/L.
+        actual = (
+            advancer
+            if advancer is not None
+            else _winner_actual(outcome.ft_home, outcome.ft_away, home, away)
+        )
         receipt["winner_pick"] = pick
         receipt["winner_actual"] = actual
         receipt["winner_correct"] = pick == actual

@@ -133,3 +133,117 @@ async def test_idempotent_no_missing_writes_nothing():
 
     assert result == {"missing": 0, "ingested": 0, "skipped": 0, "errors": 0}
     mock_save.assert_not_awaited()
+
+
+# ── Knockout advancer (EVAL-2) ───────────────────────────────────────
+
+from types import SimpleNamespace as _NS  # noqa: E402
+
+from backend.football.scripts.ingest_outcomes import (  # noqa: E402
+    _decided_by,
+    _knockout_advancer,
+)
+
+
+def _ko(*, home="Argentina", away="France", hw=None, aw=None,
+        ft=(0, 0), et=(None, None), pen=(None, None), rnd="Final"):
+    """Knockout fixture shaped like API-Football (EVAL-2-PRE WC2022 shapes)."""
+    return _NS(
+        teams=_NS(home=_NS(name=home, winner=hw), away=_NS(name=away, winner=aw)),
+        score=_NS(
+            fulltime=_NS(home=ft[0], away=ft[1]),
+            extratime=_NS(home=et[0], away=et[1]),
+            penalty=_NS(home=pen[0], away=pen[1]),
+        ),
+        league=_NS(round=rnd),
+    )
+
+
+class TestKnockoutAdvancer:
+    def test_penalties_final_shape(self):
+        # The 2022 Final: ft 2-2, et 1-1, pen 4-2, Argentina (home) winner.
+        fx = _ko(home="Argentina", away="France", hw=True, aw=False,
+                 ft=(2, 2), et=(1, 1), pen=(4, 2))
+        assert _knockout_advancer(fx) == ("Argentina", "penalties")
+
+    def test_penalties_away_advanced(self):
+        # Netherlands 2-2 Argentina QF, pens 3-4 → away (Argentina) advanced.
+        fx = _ko(home="Netherlands", away="Argentina", hw=False, aw=True,
+                 ft=(2, 2), et=(0, 0), pen=(3, 4), rnd="Quarter-finals")
+        assert _knockout_advancer(fx) == ("Argentina", "penalties")
+
+    def test_regulation_90min(self):
+        # Argentina 2-1 Australia R16 — decided in 90.
+        fx = _ko(home="Argentina", away="Australia", hw=True, aw=False,
+                 ft=(2, 1), rnd="Round of 16")
+        assert _knockout_advancer(fx) == ("Argentina", "regulation")
+
+    def test_extra_time_synthetic(self):
+        # No real ET-decided KO in any snapshot — synthetic: ft level, ET
+        # non-level, no pens.
+        fx = _ko(home="Spain", away="Italy", hw=True, aw=False,
+                 ft=(1, 1), et=(2, 1), rnd="Semi-finals")
+        assert _knockout_advancer(fx) == ("Spain", "extra_time")
+
+    # ── Fallback chain (winner boolean missing) ──
+    def test_fallback_penalty_when_winner_missing(self):
+        fx = _ko(hw=None, aw=None, ft=(1, 1), et=(0, 0), pen=(5, 3))
+        assert _knockout_advancer(fx) == ("Argentina", "penalties")
+
+    def test_fallback_cumulative_when_winner_missing(self):
+        # ft 1-1 + et 1-0 → cumulative 2-1 → home advanced; ET-decided.
+        fx = _ko(hw=None, aw=None, ft=(1, 1), et=(1, 0))
+        assert _knockout_advancer(fx) == ("Argentina", "extra_time")
+
+    def test_fallback_fulltime_when_winner_missing(self):
+        fx = _ko(hw=None, aw=None, ft=(2, 1))
+        assert _knockout_advancer(fx) == ("Argentina", "regulation")
+
+    def test_undeterminable_returns_none(self):
+        # All level, no penalty, no winner → cannot tell. Never guess.
+        fx = _ko(hw=None, aw=None, ft=(0, 0), et=(0, 0), pen=(None, None))
+        advancer, decided = _knockout_advancer(fx)
+        assert advancer is None
+
+    def test_decided_by_penalty_checked_before_extratime(self):
+        # A pens match also carries an ET score — must classify as penalties.
+        fx = _ko(ft=(2, 2), et=(1, 1), pen=(4, 2))
+        assert _decided_by(fx) == "penalties"
+
+
+@pytest.mark.parametrize("rnd,is_ko", [
+    ("Round of 16", True), ("Final", True), ("Group Stage - 1", False),
+    (None, False),
+])
+async def test_knockout_capture_only_for_ko_rounds(rnd, is_ko):
+    """A knockout round captures an advancer; group/None does not."""
+    fx = _mock_fixture("PEN")
+    fx.fixture.status.short = "FT"
+    fx.league.round = rnd
+    fx.teams.home.id = 1
+    fx.teams.away.id = 2
+    fx.teams.home.winner = True
+    fx.teams.away.winner = False
+    fx.score.fulltime.home = 1
+    fx.score.fulltime.away = 1
+    fx.score.extratime.home = None
+    fx.score.extratime.away = None
+    fx.score.penalty.home = 4
+    fx.score.penalty.away = 3
+
+    db_patch, _session = _patch_db(predicted_ids={100}, existing_ids=set())
+    with db_patch, _patch_client(fx), patch.object(
+        ingest_outcomes, "save_outcome", new=AsyncMock()
+    ) as mock_save, patch.object(
+        ingest_outcomes, "get_settings",
+        return_value=MagicMock(api_football_key="k"),
+    ):
+        await ingest_outcomes.run_ingest()
+
+    kwargs = mock_save.await_args.kwargs
+    if is_ko:
+        assert kwargs["advancer_team"] == "Mexico"   # home name, winner=True
+        assert kwargs["decided_by"] == "penalties"
+    else:
+        assert kwargs["advancer_team"] is None
+        assert kwargs["decided_by"] is None
