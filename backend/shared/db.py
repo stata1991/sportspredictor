@@ -29,6 +29,19 @@ engine = create_async_engine(
     max_overflow=5,
     pool_pre_ping=True,
     pool_recycle=1800,
+    # EVAL-3 / TRACK-4 defense-in-depth: cap DB ops so a stalled Supabase
+    # pooler connection raises fast instead of hanging the await forever
+    # (httpx is capped at 10s; the DB was not). statement_timeout is a
+    # SERVER-SIDE cap on any single query (30s — orders of magnitude above
+    # our sub-second queries) that persists on the session pooler; this is
+    # what lets the scheduler's per-cycle wait_for cancel cleanly rather
+    # than blocking on an unresponsive socket. connect_timeout caps TCP
+    # connect to the pooler. SQLAlchemy's pool_timeout (default 30s) already
+    # caps waiting for a pooled connection.
+    connect_args={
+        "connect_timeout": 10,
+        "options": "-c statement_timeout=30000",
+    },
 )
 
 AsyncSessionLocal = async_sessionmaker(

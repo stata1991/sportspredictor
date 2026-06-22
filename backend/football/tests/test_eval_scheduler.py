@@ -109,3 +109,96 @@ class TestRunEvaluation:
         mock_ingest.assert_awaited_once()
         mock_compute.assert_awaited_once()
         assert result == {"ingested": 2, "rollups_written": 16}
+
+
+# ── Per-cycle hang guard (EVAL-3 / TRACK-4) ──────────────────────────
+
+
+class TestEvalHangSurvival:
+    """THE TRACK-4 failure mode: run_evaluation hung on an uncapped await for
+    12.5h — the broad try/except cannot catch a hang, and there was no
+    per-cycle timeout, so the loop went silent forever.  With the wait_for
+    guard a hung cycle must raise TimeoutError → be caught → emit
+    ``eval_run_timeout`` → and the loop must TICK AGAIN (survive)."""
+
+    @patch("backend.football.scheduler._sentry_enabled", return_value=False)
+    @patch("backend.football.scheduler.get_settings")
+    async def test_hung_eval_cycle_times_out_and_loop_survives(
+        self, mock_get_settings, _mock_sentry, capsys
+    ):
+        mock_get_settings.return_value = _mock_settings(eval_interval_seconds=0)
+
+        call_count = 0
+
+        async def _hang():
+            # Never returns within the (patched-tiny) timeout — exactly the
+            # 02:15-UTC stalled-pooler await that froze the outcomes table.
+            nonlocal call_count
+            call_count += 1
+            await asyncio.sleep(10)
+
+        with patch(
+            "backend.football.scheduler.run_evaluation", new=_hang
+        ), patch(
+            "backend.football.scheduler.EVAL_CYCLE_TIMEOUT_SECONDS", 0.01
+        ):
+            from backend.football.scheduler import start_eval_scheduler
+
+            task = await start_eval_scheduler()
+            await asyncio.sleep(0.1)  # let several 0.01s timeouts fire
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        # Survived: the loop did NOT freeze on the first hung cycle — it
+        # cancelled it and ticked again (call_count climbs).
+        assert call_count >= 2, (
+            f"loop froze on the hung cycle (run_evaluation called "
+            f"{call_count}x; expected it to recover and tick again)"
+        )
+
+        events = [
+            json.loads(line)
+            for line in capsys.readouterr().out.splitlines()
+            if line.strip().startswith("{")
+        ]
+        timeouts = [e for e in events if e.get("event") == "eval_run_timeout"]
+        assert timeouts, "expected an eval_run_timeout tick-error event"
+        assert timeouts[0]["timeout_seconds"] == 0.01
+        assert timeouts[0]["phase"] == "eval_run"
+        # A hung cycle ingests nothing — no success event must be emitted.
+        assert not [e for e in events if e.get("event") == "eval_run"]
+        # The loop kept running — it did not emit its terminal stop event
+        # until the explicit cancel (which we swallow above).
+        assert [e for e in events if e.get("event") == "eval_scheduler_stopped"]
+
+    @patch("backend.football.scheduler.run_evaluation", new_callable=AsyncMock)
+    @patch("backend.football.scheduler._sentry_enabled", return_value=False)
+    @patch("backend.football.scheduler.get_settings")
+    async def test_normal_cycle_under_timeout_no_false_trip(
+        self, mock_get_settings, _mock_sentry, mock_run_eval, capsys
+    ):
+        """A fast cycle (the common case) must complete well under the 600s
+        timeout and NEVER emit eval_run_timeout — no false positives."""
+        mock_get_settings.return_value = _mock_settings(eval_interval_seconds=0)
+        mock_run_eval.return_value = {"ingested": 1, "rollups_written": 16}
+
+        from backend.football.scheduler import start_eval_scheduler
+
+        task = await start_eval_scheduler()
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        events = [
+            json.loads(line)
+            for line in capsys.readouterr().out.splitlines()
+            if line.strip().startswith("{")
+        ]
+        assert [e for e in events if e.get("event") == "eval_run"]
+        assert not [e for e in events if e.get("event") == "eval_run_timeout"]

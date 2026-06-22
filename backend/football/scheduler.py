@@ -33,10 +33,34 @@ _MONITOR_SLUG = "prewarm-scheduler"
 _MONITOR_CONFIG = {
     "schedule": {"type": "interval", "value": 15, "unit": "minute"},
     "checkin_margin": 5,       # grace period (minutes) for missed check-ins
-    "max_runtime": 120,        # seconds — a tick warming 4 fixtures takes ~2 min
+    # Sentry max_runtime is in MINUTES (was 120 with a "seconds" comment — a
+    # hung warm would only flag after 120 MIN). Aligned with the per-cycle
+    # asyncio.timeout (10 min) so a hung tick is flagged promptly.
+    "max_runtime": 10,
     "failure_issue_threshold": 2,
     "recovery_threshold": 1,
 }
+
+
+# ── Per-cycle hang guard (EVAL-3) ────────────────────────────────────
+# TRACK-4: a cycle's work (an uncapped DB await on a stalled Supabase
+# pooler connection) hung the loop for 12.5h — the broad try/except below
+# catches EXCEPTIONS but cannot catch a hang (an await that never returns),
+# and there was no per-cycle timeout. These cap each cycle so a hang raises
+# TimeoutError → is caught → the loop emits a timeout event and ticks again,
+# instead of going silent forever. Aligned with the Sentry monitor
+# max_runtime (minutes).
+#
+# NB: we use `async with asyncio.timeout(...)`, NOT `asyncio.wait_for(...)`.
+# On Python 3.11, wait_for has a cancellation-loss race (bpo-42130): if the
+# loop is cancelled (e.g. at shutdown) at the instant the inner coroutine
+# resolves, wait_for returns the result and SWALLOWS the CancelledError, so
+# the loop would never exit and shutdown would hang. asyncio.timeout (3.11+)
+# propagates external cancellation cleanly while still raising TimeoutError
+# on its own deadline — the correct primitive for a long-lived cancellable
+# loop.
+PREWARM_CYCLE_TIMEOUT_SECONDS = 600  # 10 min — a normal warm of ≤8 fixtures is ~2 min
+EVAL_CYCLE_TIMEOUT_SECONDS = 600     # 10 min — ingest+compute is normally seconds
 
 
 def _sentry_enabled() -> bool:
@@ -89,12 +113,16 @@ async def _scheduler_loop() -> None:
                 window_start = now + timedelta(minutes=window_start_minutes)
                 window_end = now + timedelta(minutes=window_end_minutes)
 
-                await _warm_fixtures_background(
-                    tick_id=tick_id,
-                    window_start=window_start,
-                    window_end=window_end,
-                    dry_run=False,
-                )
+                # Per-cycle timeout (EVAL-3): same hang guard as the eval loop
+                # — a hung warm is cancelled so the loop survives and ticks
+                # again. A silent prewarm hang means cold, slow match pages.
+                async with asyncio.timeout(PREWARM_CYCLE_TIMEOUT_SECONDS):
+                    await _warm_fixtures_background(
+                        tick_id=tick_id,
+                        window_start=window_start,
+                        window_end=window_end,
+                        dry_run=False,
+                    )
 
                 # ── Phase: checkin_finish ─────────────────────────
                 if _sentry_enabled() and check_in_id is not None:
@@ -108,6 +136,25 @@ async def _scheduler_loop() -> None:
 
             except asyncio.CancelledError:
                 raise  # Must propagate — this exits the loop
+
+            except asyncio.TimeoutError:
+                # Hung warm cycle — cancelled, flagged, and the loop ticks on.
+                _emit({
+                    "event": "prewarm_timeout",
+                    "tick_id": tick_id,
+                    "timeout_seconds": PREWARM_CYCLE_TIMEOUT_SECONDS,
+                    "phase": phase,
+                })
+                if _sentry_enabled() and check_in_id is not None:
+                    try:
+                        capture_checkin(
+                            monitor_slug=_MONITOR_SLUG,
+                            check_in_id=check_in_id,
+                            status=MonitorStatus.ERROR,
+                            monitor_config=_MONITOR_CONFIG,
+                        )
+                    except Exception:
+                        pass
 
             except Exception as exc:
                 _emit({
@@ -211,7 +258,11 @@ async def _eval_scheduler_loop() -> None:
                     )
 
                 phase = "eval_run"
-                counts = await run_evaluation()
+                # Per-cycle timeout (EVAL-3): a hung run_evaluation is
+                # cancelled so the loop survives and ticks again instead of
+                # going silent forever (TRACK-4).
+                async with asyncio.timeout(EVAL_CYCLE_TIMEOUT_SECONDS):
+                    counts = await run_evaluation()
                 _emit({
                     "event": "eval_run",
                     "ingested": counts["ingested"],
@@ -229,6 +280,28 @@ async def _eval_scheduler_loop() -> None:
 
             except asyncio.CancelledError:
                 raise
+
+            except asyncio.TimeoutError:
+                # THE TRACK-4 failure mode, now recoverable: a cycle exceeded
+                # the timeout (assumed hung) and was cancelled. Emit a
+                # distinct event, mark the check-in a definitive failure (so
+                # the monitor alerts instead of leaving it IN_PROGRESS), then
+                # fall through to sleep + tick again.
+                _emit({
+                    "event": "eval_run_timeout",
+                    "timeout_seconds": EVAL_CYCLE_TIMEOUT_SECONDS,
+                    "phase": phase,
+                })
+                if _sentry_enabled() and check_in_id is not None:
+                    try:
+                        capture_checkin(
+                            monitor_slug=_EVAL_MONITOR_SLUG,
+                            check_in_id=check_in_id,
+                            status=MonitorStatus.ERROR,
+                            monitor_config=_EVAL_MONITOR_CONFIG,
+                        )
+                    except Exception:
+                        pass
 
             except Exception as exc:
                 _emit({

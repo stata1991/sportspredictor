@@ -140,6 +140,60 @@ class TestSchedulerTickFailure:
         assert "RuntimeError('API-Football exploded')" in error_events[0]["error"]
         assert error_events[0]["phase"] == "warm_dispatch"
 
+
+# ── Per-cycle hang guard (EVAL-3 / TRACK-4) ──────────────────────────
+
+
+class TestPrewarmHangSurvival:
+    """Same latent hang shape as the eval loop (TRACK-4): a warm cycle could
+    stall on an uncapped DB await and freeze the loop silently — and prewarm
+    is more critical (a silent hang means cold, slow match pages at kickoff).
+    A hung warm must raise TimeoutError → emit ``prewarm_timeout`` → tick on."""
+
+    @patch("backend.football.scheduler._sentry_enabled", return_value=False)
+    @patch("backend.football.scheduler.get_settings")
+    async def test_hung_warm_cycle_times_out_and_loop_survives(
+        self, mock_get_settings, _mock_sentry, capsys
+    ):
+        mock_get_settings.return_value = _mock_settings(prewarm_interval_seconds=0)
+
+        call_count = 0
+
+        async def _hang(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            await asyncio.sleep(10)  # never returns within the tiny timeout
+
+        with patch(
+            "backend.football.scheduler._warm_fixtures_background", new=_hang
+        ), patch(
+            "backend.football.scheduler.PREWARM_CYCLE_TIMEOUT_SECONDS", 0.01
+        ):
+            from backend.football.scheduler import start_scheduler
+
+            task = await start_scheduler()
+            await asyncio.sleep(0.1)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        assert call_count >= 2, (
+            f"loop froze on the hung warm cycle (warm called {call_count}x)"
+        )
+
+        events = [
+            json.loads(l)
+            for l in capsys.readouterr().out.strip().split("\n")
+            if l.strip().startswith("{")
+        ]
+        timeouts = [e for e in events if e.get("event") == "prewarm_timeout"]
+        assert timeouts, "expected a prewarm_timeout tick-error event"
+        assert timeouts[0]["timeout_seconds"] == 0.01
+        assert timeouts[0]["phase"] == "warm_dispatch"
+        assert [e for e in events if e.get("event") == "scheduler_stopped"]
+
     @patch("backend.football.scheduler.sentry_sdk")
     @patch("backend.football.scheduler.capture_checkin")
     @patch("backend.football.scheduler._sentry_enabled", return_value=True)
@@ -379,7 +433,10 @@ class TestMonitorConfig:
             assert config["schedule"]["value"] == 15
             assert config["schedule"]["unit"] == "minute"
             assert config["checkin_margin"] == 5
-            assert config["max_runtime"] == 120
+            # EVAL-3: max_runtime is MINUTES (was 120 mislabeled "seconds" — a
+            # 2h window); aligned to 10 min with the per-cycle asyncio.timeout
+            # so a hung warm is flagged promptly, not after 2 hours.
+            assert config["max_runtime"] == 10
 
 
 # ── Graceful shutdown: scheduler_stopped emitted ─────────────────────
