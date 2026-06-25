@@ -12,6 +12,7 @@ Started by the app lifespan in ``main.py`` when
 from __future__ import annotations
 
 import asyncio
+import time
 import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -68,6 +69,190 @@ def _sentry_enabled() -> bool:
     return sentry_sdk.is_initialized()
 
 
+# ── EVAL-4 Layer 2: abandon-on-timeout cycle guard ───────────────────
+# EVAL-3 wrapped each cycle in `async with asyncio.timeout(...)`. TRACK-7
+# proved that insufficient: the timeout cancels the CURRENT task at its await
+# point, but the hung cycle's cleanup (get_db_session().__aexit__ → rollback/
+# close on a black-holed Supabase socket) ALSO blocked, so the cancellation
+# could not unwind — the loop parked pending forever, 16h silent, no event.
+#
+# Here a cycle runs as a CHILD task and we stop WAITING for it on timeout
+# (asyncio.wait returns the pending set WITHOUT awaiting it). The loop's
+# progress never depends on the hung task finishing — even an UNCANCELLABLE
+# teardown can no longer park the loop. `asyncio.wait` (not `asyncio.wait_for`)
+# is deliberate: wait_for has the bpo-42130 cancellation-loss race EVAL-3
+# called out; asyncio.wait does not cancel-on-timeout and surfaces external
+# (shutdown) cancellation cleanly.
+WATCHDOG_TIMEOUT_SECONDS = 60  # the grading watchdog does ≤1 cached fetch + 1 query
+
+
+async def _run_cycle(coro_factory, timeout_seconds: float):
+    """Run one scheduler cycle, abandoning it if it blows the time budget.
+
+    Returns the cycle's result on success; re-raises its exception; raises
+    ``asyncio.TimeoutError`` if it exceeds ``timeout_seconds`` (the hung task
+    is best-effort cancelled and then ORPHANED — never awaited).
+    """
+    task = asyncio.create_task(coro_factory())
+    try:
+        done, pending = await asyncio.wait({task}, timeout=timeout_seconds)
+    except asyncio.CancelledError:
+        task.cancel()  # shutdown: don't leak the child
+        raise
+    if task in pending:
+        task.cancel()  # best-effort; we do NOT await the (maybe wedged) teardown
+        raise asyncio.TimeoutError
+    return task.result()
+
+
+async def _drop_pooled_connections() -> None:
+    """Force-drop pooled DB connections after a hung cycle so a parked /
+    half-open connection cannot poison the next cycle. Self-bounded: a dispose
+    that itself blocks must not re-hang the loop (keepalives cap it at ~60s;
+    the timeout is a belt-and-braces second cap)."""
+    try:
+        from backend.shared.db import engine
+
+        async with asyncio.timeout(10):
+            await engine.dispose()
+    except Exception:
+        pass
+
+
+# ── EVAL-4 Layer 3: cross-loop grading watchdog ──────────────────────
+# Placed in the PREWARM loop, NOT the eval loop. TRACK-7 is decisive: the
+# eval loop is the thing that dies, and the prewarm loop ran the full 16h it
+# was dead. A watchdog inside the eval loop would have died WITH it and seen
+# nothing. From the surviving prewarm context it observes the eval loop two
+# independent, cause-agnostic ways — either signal is the alert all three
+# prior grading freezes would have tripped regardless of their differing
+# causes.
+class _EvalHeartbeat:
+    """Liveness beacon the eval loop stamps on every successful cycle and the
+    prewarm-loop watchdog reads. Monotonic for math (immune to wall-clock
+    jumps), wall for human-readable display in the alert."""
+
+    def __init__(self) -> None:
+        self._mono: float | None = None
+        self._wall: datetime | None = None
+
+    def record(self) -> None:
+        self._mono = time.monotonic()
+        self._wall = datetime.now(timezone.utc)
+
+    @property
+    def monotonic(self) -> float | None:
+        return self._mono
+
+    @property
+    def wall(self) -> datetime | None:
+        return self._wall
+
+
+_eval_heartbeat = _EvalHeartbeat()
+
+
+async def _grading_freshness() -> tuple[datetime | None, datetime | None]:
+    """``(newest finished-match kickoff, newest graded-outcome kickoff)``.
+
+    ``newest_ft`` comes from the cached WC fixtures list (the prewarm loop just
+    fetched it — no extra API cost); ``newest_graded`` is
+    ``max(Outcome.kickoff_at)``. A large gap means matches are finishing but
+    the grader is not keeping up — the symptom every grading freeze shares.
+    """
+    from sqlalchemy import func, select
+
+    from backend.cache import CacheClient
+    from backend.football.data_provider import APIFootballClient
+    from backend.football.scripts.ingest_outcomes import _COMPLETED
+    from backend.shared.async_singleflight import AsyncSingleflight
+    from backend.shared.db import get_db_session
+    from backend.shared.models import Outcome
+
+    settings = get_settings()
+
+    newest_ft: datetime | None = None
+    async with APIFootballClient(
+        settings.api_football_key, CacheClient(), AsyncSingleflight()
+    ) as client:
+        fixtures = await client.get_fixtures()
+    for fx in fixtures:
+        if fx.fixture.status.short in _COMPLETED:
+            ko = fx.fixture.date
+            if newest_ft is None or ko > newest_ft:
+                newest_ft = ko
+
+    async with get_db_session() as session:
+        newest_graded = await session.scalar(select(func.max(Outcome.kickoff_at)))
+
+    return newest_ft, newest_graded
+
+
+async def _check_grading_liveness(*, eval_interval_seconds: int) -> None:
+    """Observe the eval loop from the surviving prewarm context (EVAL-4 L3).
+
+    Emits a Sentry signal + structured event on either of two checks. Never
+    raises into the prewarm loop — the heartbeat half (cheap, no I/O) runs
+    first and unconditionally, so an alert still fires even if the freshness
+    half (which does I/O and could itself be wedged) blows up.
+    """
+    settings = get_settings()
+    if not settings.eval_scheduler_enabled:
+        return  # nothing to watch
+
+    threshold = 2 * eval_interval_seconds
+
+    # (a) HEARTBEAT — has the eval loop completed a cycle within 2× interval?
+    last_mono = _eval_heartbeat.monotonic
+    if last_mono is None or (time.monotonic() - last_mono) > threshold:
+        secs = None if last_mono is None else round(time.monotonic() - last_mono)
+        last_wall = _eval_heartbeat.wall
+        _emit({
+            "event": "eval_heartbeat_missed",
+            "last_eval_run": last_wall.isoformat() if last_wall else None,
+            "seconds_since_last": secs,
+            "threshold_seconds": threshold,
+        })
+        if _sentry_enabled():
+            try:
+                sentry_sdk.capture_message(
+                    "eval_heartbeat_missed: grading loop stalled", level="error"
+                )
+            except Exception:
+                pass
+
+    # (b) FRESHNESS — is the graded corpus keeping up with finished matches?
+    try:
+        newest_ft, newest_graded = await _grading_freshness()
+        if (
+            newest_ft is not None
+            and newest_graded is not None
+            and (newest_ft - newest_graded).total_seconds() > threshold
+        ):
+            lag = (newest_ft - newest_graded).total_seconds()
+            _emit({
+                "event": "grading_lag",
+                "lag_minutes": round(lag / 60, 1),
+                "newest_ft": newest_ft.isoformat(),
+                "newest_graded": newest_graded.isoformat(),
+                "threshold_seconds": threshold,
+            })
+            if _sentry_enabled():
+                try:
+                    sentry_sdk.capture_message(
+                        "grading_lag: graded corpus behind finished matches",
+                        level="error",
+                    )
+                except Exception:
+                    pass
+    except Exception as exc:
+        _emit({
+            "event": "grading_watchdog_error",
+            "phase": "freshness",
+            "error": repr(exc),
+        })
+
+
 async def _scheduler_loop() -> None:
     """Run pre-warm ticks forever until cancelled.
 
@@ -113,16 +298,39 @@ async def _scheduler_loop() -> None:
                 window_start = now + timedelta(minutes=window_start_minutes)
                 window_end = now + timedelta(minutes=window_end_minutes)
 
-                # Per-cycle timeout (EVAL-3): same hang guard as the eval loop
-                # — a hung warm is cancelled so the loop survives and ticks
-                # again. A silent prewarm hang means cold, slow match pages.
-                async with asyncio.timeout(PREWARM_CYCLE_TIMEOUT_SECONDS):
-                    await _warm_fixtures_background(
+                # Per-cycle guard (EVAL-4): a hung warm is ABANDONED (not just
+                # cancelled) so the loop survives even if teardown wedges. A
+                # silent prewarm hang means cold, slow match pages.
+                await _run_cycle(
+                    lambda: _warm_fixtures_background(
                         tick_id=tick_id,
                         window_start=window_start,
                         window_end=window_end,
                         dry_run=False,
+                    ),
+                    PREWARM_CYCLE_TIMEOUT_SECONDS,
+                )
+
+                # ── Phase: grading_watchdog (EVAL-4 L3) ───────────
+                # Observe the EVAL loop from THIS loop, which survives an eval
+                # death (TRACK-7). Abandon-guarded and try-wrapped: a watchdog
+                # stall or error must never perturb the prewarm cycle.
+                phase = "grading_watchdog"
+                try:
+                    await _run_cycle(
+                        lambda: _check_grading_liveness(
+                            eval_interval_seconds=settings.eval_interval_seconds
+                        ),
+                        WATCHDOG_TIMEOUT_SECONDS,
                     )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    _emit({
+                        "event": "grading_watchdog_error",
+                        "phase": phase,
+                        "error": repr(exc),
+                    })
 
                 # ── Phase: checkin_finish ─────────────────────────
                 if _sentry_enabled() and check_in_id is not None:
@@ -138,13 +346,16 @@ async def _scheduler_loop() -> None:
                 raise  # Must propagate — this exits the loop
 
             except asyncio.TimeoutError:
-                # Hung warm cycle — cancelled, flagged, and the loop ticks on.
+                # Hung warm cycle — abandoned, flagged, and the loop ticks on.
                 _emit({
                     "event": "prewarm_timeout",
                     "tick_id": tick_id,
                     "timeout_seconds": PREWARM_CYCLE_TIMEOUT_SECONDS,
                     "phase": phase,
                 })
+                # Drop pooled connections so a parked/half-open one (the likely
+                # cause of the hang) can't poison the next cycle.
+                await _drop_pooled_connections()
                 if _sentry_enabled() and check_in_id is not None:
                     try:
                         capture_checkin(
@@ -243,6 +454,10 @@ async def _eval_scheduler_loop() -> None:
     interval = settings.eval_interval_seconds
 
     _emit({"event": "eval_scheduler_started", "interval_seconds": interval})
+    # Establish a boot baseline so the cross-loop watchdog does not false-trip
+    # before the first cycle completes (the loop fires immediately, so a real
+    # success stamps within seconds; this covers the gap in between).
+    _eval_heartbeat.record()
 
     try:
         while True:
@@ -258,16 +473,21 @@ async def _eval_scheduler_loop() -> None:
                     )
 
                 phase = "eval_run"
-                # Per-cycle timeout (EVAL-3): a hung run_evaluation is
-                # cancelled so the loop survives and ticks again instead of
-                # going silent forever (TRACK-4).
-                async with asyncio.timeout(EVAL_CYCLE_TIMEOUT_SECONDS):
-                    counts = await run_evaluation()
+                # Per-cycle guard (EVAL-4): a hung run_evaluation is ABANDONED
+                # — not merely cancelled — so the loop survives even when the
+                # cycle's teardown wedges on a dead socket (TRACK-7), instead
+                # of parking pending forever.
+                counts = await _run_cycle(
+                    run_evaluation, EVAL_CYCLE_TIMEOUT_SECONDS
+                )
                 _emit({
                     "event": "eval_run",
                     "ingested": counts["ingested"],
                     "rollups_written": counts["rollups_written"],
                 })
+                # Stamp the liveness beacon ONLY on a fully successful cycle —
+                # this is what the cross-loop watchdog reads.
+                _eval_heartbeat.record()
 
                 if _sentry_enabled() and check_in_id is not None:
                     phase = "checkin_finish"
@@ -292,6 +512,9 @@ async def _eval_scheduler_loop() -> None:
                     "timeout_seconds": EVAL_CYCLE_TIMEOUT_SECONDS,
                     "phase": phase,
                 })
+                # Drop pooled connections so a parked/half-open one (the likely
+                # cause of the hang) can't poison the next cycle.
+                await _drop_pooled_connections()
                 if _sentry_enabled() and check_in_id is not None:
                     try:
                         capture_checkin(

@@ -27,6 +27,11 @@ def _mock_settings(**overrides):
         "prewarm_interval_seconds": 0,
         "prewarm_window_start_minutes": 90,
         "prewarm_window_end_minutes": 150,
+        # EVAL-4: the prewarm loop now hosts the cross-loop grading watchdog.
+        # These prewarm tests don't exercise it — disable eval observation so
+        # the watchdog returns immediately (no network/DB) and stays inert.
+        "eval_scheduler_enabled": False,
+        "eval_interval_seconds": 1800,
     }
     defaults.update(overrides)
     return MagicMock(**defaults)
@@ -413,8 +418,11 @@ class TestMonitorConfig:
 
             task = await start_scheduler()
 
-            for _ in range(5):
-                await asyncio.sleep(0)
+            # EVAL-4: each tick now spawns child tasks (abandon-guard) for the
+            # warm AND the grading watchdog, so a fixed count of bare sleep(0)
+            # yields no longer deterministically reaches checkin_finish. A
+            # small real sleep lets the first full tick complete.
+            await asyncio.sleep(0.05)
 
             task.cancel()
             try:
