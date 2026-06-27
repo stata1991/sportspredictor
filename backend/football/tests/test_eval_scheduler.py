@@ -368,7 +368,7 @@ class TestGradingWatchdog:
                 return_value=_prewarm_mock_settings(),
             ), patch.object(
                 scheduler,
-                "_grading_freshness",
+                "_grading_lag_seconds",
                 new_callable=AsyncMock,
                 return_value=(None, None),
             ):
@@ -386,9 +386,13 @@ class TestGradingWatchdog:
     async def test_grading_lag_when_corpus_behind(self, _mock_sentry, capsys):
         from backend.football import scheduler
 
-        now = datetime.now(timezone.utc)
-        newest_ft = now
-        newest_graded = now - timedelta(hours=2)  # 7200s gap ≫ 3600 threshold
+        # 7200s true grading delay (a match FT 2h ago, still ungraded) ≫ 3600.
+        offender = {
+            "fixture_id": 99,
+            "status": "FT",
+            "kickoff": "2026-06-27T00:00:00+00:00",
+            "derived_finish": "2026-06-27T01:55:00+00:00",
+        }
 
         restore = self._set_heartbeat(seconds_ago=1)  # FRESH → isolate lag signal
         try:
@@ -398,9 +402,9 @@ class TestGradingWatchdog:
                 return_value=_prewarm_mock_settings(),
             ), patch.object(
                 scheduler,
-                "_grading_freshness",
+                "_grading_lag_seconds",
                 new_callable=AsyncMock,
-                return_value=(newest_ft, newest_graded),
+                return_value=(7200.0, offender),
             ):
                 await scheduler._check_grading_liveness(eval_interval_seconds=1800)
         finally:
@@ -408,8 +412,9 @@ class TestGradingWatchdog:
 
         events = _events_from(capsys)
         lag = [e for e in events if e.get("event") == "grading_lag"]
-        assert lag, "a corpus behind finished matches must alert"
+        assert lag, "a real grading freeze must alert"
         assert lag[0]["lag_minutes"] == 120.0
+        assert lag[0]["oldest_ungraded"]["fixture_id"] == 99
         # heartbeat was fresh — no false heartbeat alert.
         assert not [e for e in events if e.get("event") == "eval_heartbeat_missed"]
 
@@ -417,7 +422,6 @@ class TestGradingWatchdog:
     async def test_healthy_no_false_trip(self, _mock_sentry, capsys):
         from backend.football import scheduler
 
-        now = datetime.now(timezone.utc)
         restore = self._set_heartbeat(seconds_ago=10)  # fresh
         try:
             with patch.object(
@@ -426,9 +430,9 @@ class TestGradingWatchdog:
                 return_value=_prewarm_mock_settings(),
             ), patch.object(
                 scheduler,
-                "_grading_freshness",
+                "_grading_lag_seconds",
                 new_callable=AsyncMock,
-                return_value=(now, now - timedelta(minutes=5)),  # 5min < 60min
+                return_value=(300.0, {"fixture_id": 1}),  # 5min < 60min
             ):
                 await scheduler._check_grading_liveness(eval_interval_seconds=1800)
         finally:
@@ -458,7 +462,7 @@ class TestGradingWatchdog:
                 scheduler, "_warm_fixtures_background", new_callable=AsyncMock
             ), patch.object(
                 scheduler,
-                "_grading_freshness",
+                "_grading_lag_seconds",
                 new_callable=AsyncMock,
                 return_value=(None, None),
             ):
@@ -477,3 +481,145 @@ class TestGradingWatchdog:
         assert [e for e in events if e.get("event") == "eval_heartbeat_missed"]
         assert [e for e in events if e.get("event") == "scheduler_started"]
         assert not [e for e in events if e.get("event") == "eval_scheduler_started"]
+
+
+# ── TRACK-10: grading_lag measures TRUE since-FT delay, not kickoff spacing ──
+
+
+def _fake_fixture(fid: int, status: str, kickoff: datetime):
+    """Minimal stand-in exposing the three fields _grading_lag_seconds reads:
+    ``fixture.id``, ``fixture.status.short``, ``fixture.date``."""
+    fx = MagicMock()
+    fx.fixture.id = fid
+    fx.fixture.status.short = status
+    fx.fixture.date = kickoff
+    return fx
+
+
+def _id_result(ids):
+    """A SQLAlchemy-result stand-in: ``.scalars().all()`` → the id list."""
+    r = MagicMock()
+    r.scalars.return_value.all.return_value = list(ids)
+    return r
+
+
+async def _run_grading_lag(fixtures, predicted, graded):
+    """Drive scheduler._grading_lag_seconds with mocked fixtures + DB.
+
+    First session.execute → predicted ids; second → graded ids (the call order
+    inside the function).
+    """
+    from backend.football import scheduler
+
+    fake_client = MagicMock()
+    fake_client.get_fixtures = AsyncMock(return_value=fixtures)
+    client_cm = MagicMock()
+    client_cm.__aenter__ = AsyncMock(return_value=fake_client)
+    client_cm.__aexit__ = AsyncMock(return_value=False)
+
+    session = MagicMock()
+    session.execute = AsyncMock(
+        side_effect=[_id_result(predicted), _id_result(graded)]
+    )
+    db_cm = MagicMock()
+    db_cm.__aenter__ = AsyncMock(return_value=session)
+    db_cm.__aexit__ = AsyncMock(return_value=False)
+
+    with patch.object(
+        scheduler, "get_settings", return_value=_prewarm_mock_settings()
+    ), patch(
+        "backend.football.data_provider.APIFootballClient",
+        return_value=client_cm,
+    ), patch(
+        "backend.cache.CacheClient", MagicMock()
+    ), patch(
+        "backend.shared.async_singleflight.AsyncSingleflight", MagicMock()
+    ), patch(
+        "backend.shared.db.get_db_session", return_value=db_cm
+    ):
+        return await scheduler._grading_lag_seconds()
+
+
+class TestGradingLagComputation:
+    """The fix itself: lag is wall-clock since the OLDEST FT-but-ungraded match
+    FINISHED — never the kickoff-to-kickoff gap that produced the overnight
+    false positives (TRACK-9/TRACK-10)."""
+
+    async def test_overnight_false_positive_is_gone(self):
+        """The exact overnight scenario: a match FT'd ~10 min ago, ungraded,
+        with a 5h KICKOFF gap to the previously graded match. The OLD metric
+        reported the 5h gap; the new one must report ~10 min — below threshold,
+        no breach."""
+        now = datetime.now(timezone.utc)
+        fixtures = [
+            # Previously graded match, kicked off 5h05m ago (the kickoff gap).
+            _fake_fixture(1, "FT", now - timedelta(minutes=305)),
+            # Just FT'd ~10 min ago: kickoff 125m ago + 115m offset = finish 10m ago.
+            _fake_fixture(2, "FT", now - timedelta(minutes=125)),
+        ]
+        lag, offender = await _run_grading_lag(
+            fixtures, predicted={1, 2}, graded={1}
+        )
+
+        assert lag is not None
+        # ~10 min (600s), NOT the 5h (18000s) kickoff gap.
+        assert 540 <= lag <= 720, f"expected ~10min, got {lag/60:.1f}min"
+        assert lag < 3600, "must NOT breach the 1h threshold (false positive)"
+        assert offender["fixture_id"] == 2
+
+    async def test_real_freeze_still_fires(self):
+        """A match FT'd well over 1h ago and still ungraded must report >1h so
+        the watchdog still catches a genuine grading freeze."""
+        now = datetime.now(timezone.utc)
+        fixtures = [
+            # kickoff 200m ago + 115m offset = finished 85 min ago, ungraded.
+            _fake_fixture(7, "FT", now - timedelta(minutes=200)),
+        ]
+        lag, offender = await _run_grading_lag(
+            fixtures, predicted={7}, graded=set()
+        )
+
+        assert lag is not None
+        assert lag > 3600, f"a real >1h freeze must breach; got {lag/60:.1f}min"
+        assert offender["fixture_id"] == 7
+
+    async def test_healthy_nothing_ungraded(self):
+        """Steady state: every completed match is graded (and an upcoming match
+        is not yet completed) → no lag, no breach."""
+        now = datetime.now(timezone.utc)
+        fixtures = [
+            _fake_fixture(1, "FT", now - timedelta(minutes=200)),  # graded
+            _fake_fixture(2, "NS", now + timedelta(minutes=90)),   # not started
+        ]
+        lag, offender = await _run_grading_lag(
+            fixtures, predicted={1, 2}, graded={1}
+        )
+
+        assert lag is None and offender is None
+
+    async def test_unpredicted_completed_match_is_ignored(self):
+        """A completed match with no prediction can never be graded by
+        run_ingest, so it must NOT count as lag (a permanent false positive)."""
+        now = datetime.now(timezone.utc)
+        fixtures = [
+            _fake_fixture(5, "FT", now - timedelta(minutes=300)),  # FT, ungraded
+        ]
+        lag, offender = await _run_grading_lag(
+            fixtures, predicted=set(), graded=set()  # never predicted
+        )
+
+        assert lag is None and offender is None
+
+    async def test_just_ft_within_offset_not_yet_due(self):
+        """A match whose DERIVED finish is still in the future (FT reported
+        early relative to the offset) contributes no lag yet."""
+        now = datetime.now(timezone.utc)
+        fixtures = [
+            # kickoff 30m ago + 115m offset = finish ~85m in the FUTURE.
+            _fake_fixture(9, "FT", now - timedelta(minutes=30)),
+        ]
+        lag, offender = await _run_grading_lag(
+            fixtures, predicted={9}, graded=set()
+        )
+
+        assert lag is None and offender is None

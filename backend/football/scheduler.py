@@ -152,40 +152,103 @@ class _EvalHeartbeat:
 _eval_heartbeat = _EvalHeartbeat()
 
 
-async def _grading_freshness() -> tuple[datetime | None, datetime | None]:
-    """``(newest finished-match kickoff, newest graded-outcome kickoff)``.
+# Wall-clock minutes from kickoff to full time, by final status. Covers the
+# 45+45 of play, the ~15-min halftime, and typical stoppage; AET/PEN add the
+# extra-time period and the shootout. The API models no match-end timestamp
+# (only kickoff date + status), so finish time is DERIVED. A ±10-min derivation
+# error is immaterial against the 1h alarm threshold, and erring slightly LONG
+# is deliberate: it can only shrink the measured lag, never inflate it — the
+# opposite of the false positive TRACK-10 removes.
+_FINISH_OFFSET_MINUTES: dict[str, int] = {
+    "FT": 115,
+    "AET": 150,
+    "PEN": 165,
+}
+_DEFAULT_FINISH_OFFSET_MINUTES = 115
 
-    ``newest_ft`` comes from the cached WC fixtures list (the prewarm loop just
-    fetched it — no extra API cost); ``newest_graded`` is
-    ``max(Outcome.kickoff_at)``. A large gap means matches are finishing but
-    the grader is not keeping up — the symptom every grading freeze shares.
+
+async def _grading_lag_seconds() -> tuple[float | None, dict | None]:
+    """True grading delay: wall-clock seconds since the OLDEST finished-but-
+    ungraded predicted fixture reached full time.
+
+    Returns ``(lag_seconds, offender)``; ``lag_seconds`` is ``None`` when
+    nothing is FT-but-ungraded (healthy / idle — there is no lag to report),
+    in which case ``offender`` is ``None`` too.
+
+    TRACK-10: the prior metric diffed KICKOFF timestamps
+    (``newest_completed.kickoff − max(Outcome.kickoff_at)``), so a match graded
+    one cycle late on a sparse slate reported the inter-match kickoff SPACING
+    (hours) as "lag" instead of the true since-FT delay (~10 min) — a guaranteed
+    false positive on every clustered/knockout night. This measures wall-clock
+    time since the match actually FINISHED (kickoff + a per-status offset), so a
+    match graded ~10 min after FT reports ~10 min regardless of how far its
+    kickoff sits from the previously graded match.
+
+    Universe = run_ingest's universe (predicted AND not yet graded): a completed
+    fixture with no prediction can never be graded by ``run_ingest``, so
+    counting it would be a permanent false lag of a different kind.
     """
-    from sqlalchemy import func, select
+    from sqlalchemy import select
 
     from backend.cache import CacheClient
     from backend.football.data_provider import APIFootballClient
     from backend.football.scripts.ingest_outcomes import _COMPLETED
     from backend.shared.async_singleflight import AsyncSingleflight
     from backend.shared.db import get_db_session
-    from backend.shared.models import Outcome
+    from backend.shared.models import Outcome, Prediction
 
     settings = get_settings()
+    now = datetime.now(timezone.utc)
 
-    newest_ft: datetime | None = None
+    # The prewarm loop just fetched this list — no extra API cost.
     async with APIFootballClient(
         settings.api_football_key, CacheClient(), AsyncSingleflight()
     ) as client:
         fixtures = await client.get_fixtures()
-    for fx in fixtures:
-        if fx.fixture.status.short in _COMPLETED:
-            ko = fx.fixture.date
-            if newest_ft is None or ko > newest_ft:
-                newest_ft = ko
 
     async with get_db_session() as session:
-        newest_graded = await session.scalar(select(func.max(Outcome.kickoff_at)))
+        predicted_ids = set(
+            (
+                await session.execute(select(Prediction.fixture_id).distinct())
+            ).scalars().all()
+        )
+        graded_ids = set(
+            (await session.execute(select(Outcome.fixture_id))).scalars().all()
+        )
 
-    return newest_ft, newest_graded
+    oldest_finish: datetime | None = None
+    offender: dict | None = None
+    for fx in fixtures:
+        status = fx.fixture.status.short
+        if status not in _COMPLETED:
+            continue
+        fid = fx.fixture.id
+        if fid not in predicted_ids or fid in graded_ids:
+            continue
+
+        offset = _FINISH_OFFSET_MINUTES.get(
+            status, _DEFAULT_FINISH_OFFSET_MINUTES
+        )
+        finish = fx.fixture.date + timedelta(minutes=offset)
+        # A just-FT match whose DERIVED finish is still in the future
+        # contributes no lag yet — guards against the offset over-estimating
+        # and producing a spurious negative/early lag.
+        if finish > now:
+            continue
+
+        if oldest_finish is None or finish < oldest_finish:
+            oldest_finish = finish
+            offender = {
+                "fixture_id": fid,
+                "status": status,
+                "kickoff": fx.fixture.date.isoformat(),
+                "derived_finish": finish.isoformat(),
+            }
+
+    if oldest_finish is None:
+        return None, None  # nothing FT-but-ungraded → no lag
+
+    return (now - oldest_finish).total_seconds(), offender
 
 
 async def _check_grading_liveness(*, eval_interval_seconds: int) -> None:
@@ -221,20 +284,17 @@ async def _check_grading_liveness(*, eval_interval_seconds: int) -> None:
             except Exception:
                 pass
 
-    # (b) FRESHNESS — is the graded corpus keeping up with finished matches?
+    # (b) GRADING LAG — true wall-clock delay since the OLDEST finished-but-
+    # ungraded match reached full time (TRACK-10). NOT a kickoff-to-kickoff gap:
+    # a match graded ~10 min after FT reports ~10 min even when its kickoff sits
+    # hours from the previously graded match (the sparse-slate false positive).
     try:
-        newest_ft, newest_graded = await _grading_freshness()
-        if (
-            newest_ft is not None
-            and newest_graded is not None
-            and (newest_ft - newest_graded).total_seconds() > threshold
-        ):
-            lag = (newest_ft - newest_graded).total_seconds()
+        lag, offender = await _grading_lag_seconds()
+        if lag is not None and lag > threshold:
             _emit({
                 "event": "grading_lag",
                 "lag_minutes": round(lag / 60, 1),
-                "newest_ft": newest_ft.isoformat(),
-                "newest_graded": newest_graded.isoformat(),
+                "oldest_ungraded": offender,
                 "threshold_seconds": threshold,
             })
             if _sentry_enabled():
